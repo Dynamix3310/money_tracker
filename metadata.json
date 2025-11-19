@@ -1,0 +1,7 @@
+{
+  "name": "WealthFlow Pro",
+  "description": "A comprehensive personal wealth management app with multi-user ledger, investment tracking, and AI analysis.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
