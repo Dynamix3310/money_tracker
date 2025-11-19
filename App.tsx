@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy } from 'firebase/firestore';
@@ -58,6 +57,10 @@ export default function App() {
 
   // Init
   useEffect(() => {
+    if (!auth) {
+        setLoading(false);
+        return;
+    }
     signInAnonymously(auth).catch(console.error);
     onAuthStateChanged(auth, u => { setUser(u); if (u && !currentGroupId) setCurrentGroupId(u.uid); setLoading(false); });
   }, []);
@@ -120,7 +123,7 @@ export default function App() {
 
   // Sync Data
   useEffect(() => {
-    if (!user) return;
+    if (!user || !db) return;
     const privateCols = ['platforms', 'holdings', 'accounts', 'bankLogs', 'creditCards', 'cardLogs', 'history'];
     const privateUnsubs = privateCols.map(c => onSnapshot(c==='history'?query(collection(db, getCollectionPath(user.uid, null, c)), orderBy('date','asc')):collection(db, getCollectionPath(user.uid, null, c)), s => {
        const data = s.docs.map(d => ({id: d.id, ...d.data()}));
@@ -223,6 +226,22 @@ export default function App() {
      const url = URL.createObjectURL(blob);
      const a = document.createElement('a'); a.href = url; a.download = `backup.json`; a.click();
   };
+
+  if (!auth) {
+     return (
+       <div className="h-screen flex flex-col items-center justify-center p-8 bg-slate-50 text-slate-700">
+          <Settings size={48} className="text-indigo-400 mb-4"/>
+          <h1 className="text-2xl font-bold mb-2">Configuration Missing</h1>
+          <p className="text-center mb-6 max-w-md text-sm">
+            It seems the API keys are missing. If you are deploying to Vercel, please ensure you have added the Environment Variables (e.g., <code>REACT_APP_FIREBASE_API_KEY</code> or <code>VITE_FIREBASE_API_KEY</code>).
+          </p>
+          <div className="bg-white p-4 rounded-xl shadow border text-xs font-mono text-slate-500">
+             VITE_FIREBASE_API_KEY=...<br/>
+             VITE_FIREBASE_PROJECT_ID=...
+          </div>
+       </div>
+     )
+  }
 
   if (loading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-indigo-600" size={32} /></div>;
 

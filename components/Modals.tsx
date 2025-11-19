@@ -4,6 +4,7 @@ import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRi
 import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog, Transaction, ChatMessage, BankAccount } from '../types';
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc } from 'firebase/firestore';
 import { db, getCollectionPath } from '../services/firebase';
+import { callGemini } from '../services/gemini';
 
 const styles = {
   overlay: "fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200",
@@ -165,11 +166,11 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
        });
    };
 
-  const handleAIParse = async (imageBase64?: string) => {
+   const handleAIParse = async (imageBase64?: string) => {
       setLoading(true);
       try {
          const catList = categories.map((c:any) => c.name).join(', ');
-         const textPrompt = `
+         const prompt = `
             Parse input (text/image) into JSON array. Today: ${new Date().toISOString().split('T')[0]}.
             Context: ${importType === 'ledger' ? `Ledger (Cats: ${catList})` : importType === 'bank' ? 'Bank Statement' : 'Credit Card Statement'}.
             
@@ -183,33 +184,8 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
             Input: ${text || '(Image)'}
          `;
          
-         // 建構傳給後端的 Prompt (支援圖片)
-         let finalPrompt: any = textPrompt;
-         
-         if (imageBase64) {
-             // 處理圖片格式，移除 data:image/jpeg;base64, 前綴
-             const base64Data = imageBase64.split(',')[1];
-             const mimeType = imageBase64.split(',')[0].split(':')[1].split(';')[0];
-             
-             // 傳送陣列格式：[文字, 圖片物件]
-             finalPrompt = [
-                 textPrompt,
-                 { inlineData: { data: base64Data, mimeType: mimeType } }
-             ];
-         }
-
-         // ✅ 改用 fetch 呼叫自己的後端
-         const response = await fetch('/api/gemini', {
-             method: 'POST',
-             headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ prompt: finalPrompt })
-         });
-
-         if (!response.ok) throw new Error('API call failed');
-         const data = await response.json();
-         const resultText = data.result; // 取得後端回傳的文字
-
-         const cleaned = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
+         const result = await callGemini(prompt, imageBase64);
+         const cleaned = result.replace(/```json/g, '').replace(/```/g, '').trim();
          const json = JSON.parse(cleaned);
          
          if (Array.isArray(json)) {
@@ -398,35 +374,14 @@ export const AIAssistantModal = ({ onClose, contextData }: any) => {
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages]);
 
-  // 在 AIAssistantModal 元件內
   const handleSend = async () => {
     if (!input.trim()) return; 
-    const userMsg = input; 
-    setMessages(prev => [...prev, { role: 'user', text: userMsg }]); 
-    setInput(''); 
-    setThinking(true);
-    
+    const userMsg = input; setMessages(prev => [...prev, { role: 'user', text: userMsg }]); setInput(''); setThinking(true);
     try {
-      // ✅ 改用 fetch 呼叫後端
-      const response = await fetch('/api/gemini', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-              prompt: `Context: ${JSON.stringify(contextData)}. User: ${userMsg}. Reply in Traditional Chinese.` 
-          })
-      });
-
-      if (!response.ok) throw new Error('Network response was not ok');
-      const data = await response.json();
-      
-      setMessages(prev => [...prev, { role: 'model', text: data.result }]);
-
-    } catch (error) { 
-      console.error(error);
-      setMessages(prev => [...prev, { role: 'model', text: '連線錯誤，請稍後再試。' }]); 
-    } finally { 
-      setThinking(false); 
-    }
+      const response = await callGemini(`Context: ${JSON.stringify(contextData)}. User: ${userMsg}. Reply in Traditional Chinese.`);
+      setMessages(prev => [...prev, { role: 'model', text: response }]);
+    } catch (error) { setMessages(prev => [...prev, { role: 'model', text: '連線錯誤' }]); } 
+    finally { setThinking(false); }
   };
 
   return (
@@ -560,48 +515,19 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
    const currentCats = categories.filter((c:any) => c.type === type);
    useEffect(() => { if(currentCats.length > 0 && !category) setCategory(currentCats[0].name); }, [type, categories]);
 
-   // 在 AddTransactionModal 元件內
    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0]; if (!file) return; 
-      setLoadingAI(true);
-      
+      const file = e.target.files?.[0]; if (!file) return; setLoadingAI(true);
       const reader = new FileReader(); 
       reader.onloadend = async () => {
          try {
-            const imageBase64 = reader.result as string;
-            const promptText = `Analyze receipt. Extract totalAmount, date(YYYY-MM-DD), description, category from list: ${currentCats.map((c:any)=>c.name).join(',')}. Return JSON.`;
-            
-            // 處理圖片
-            const base64Data = imageBase64.split(',')[1];
-            const mimeType = imageBase64.split(',')[0].split(':')[1].split(';')[0];
-
-            // ✅ 改用 fetch 呼叫後端
-            const response = await fetch('/api/gemini', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    prompt: [
-                        promptText,
-                        { inlineData: { data: base64Data, mimeType: mimeType } }
-                    ]
-                })
-            });
-
-            if (!response.ok) throw new Error('API Error');
-            const data = await response.json();
-            const resultText = data.result;
-
+            const prompt = `Analyze receipt. Extract totalAmount, date(YYYY-MM-DD), description, category from list: ${currentCats.map((c:any)=>c.name).join(',')}. Return JSON.`;
+            const resultText = await callGemini(prompt, reader.result as string);
             const json = JSON.parse(resultText.replace(/```json/g, '').replace(/```/g, ''));
             if(json.totalAmount) setAmount(json.totalAmount); 
             if(json.description) setDescription(json.description);
             if(json.category) setCategory(json.category); 
             if(json.date) setDate(json.date);
-         } catch (err) { 
-             console.error(err);
-             alert("AI 辨識失敗"); 
-         } finally { 
-             setLoadingAI(false); 
-         }
+         } catch (err) { alert("AI 辨識失敗"); } finally { setLoadingAI(false); }
       }; 
       reader.readAsDataURL(file);
    };

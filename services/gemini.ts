@@ -1,16 +1,40 @@
 import { GoogleGenAI } from "@google/genai";
 
-const apiKey = process.env.API_KEY || ""; 
+const getApiKey = () => {
+  let key = undefined;
+  
+  // 1. Try import.meta.env for Vite
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      // @ts-ignore
+      key = import.meta.env.API_KEY || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.REACT_APP_GEMINI_API_KEY;
+    }
+  } catch (e) {}
+
+  // 2. Try process.env
+  if (!key) {
+    try {
+      if (typeof process !== 'undefined' && process.env) {
+        key = process.env.API_KEY || process.env.REACT_APP_GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+      }
+    } catch (e) {}
+  }
+  
+  return key || "";
+};
+
+const apiKey = getApiKey();
 
 export async function callGemini(prompt: string, imageBase64?: string) {
   if (!apiKey) {
     console.warn("Gemini API Key not found in env");
-    return "API Key Missing";
+    return "API Key Missing. Please configure VITE_GEMINI_API_KEY in Vercel environment variables.";
   }
 
   try {
     const ai = new GoogleGenAI({ apiKey });
-    const modelId = imageBase64 ? 'gemini-2.5-flash' : 'gemini-2.5-flash';
+    const modelId = 'gemini-2.5-flash';
     
     let response;
     
