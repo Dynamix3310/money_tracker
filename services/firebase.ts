@@ -1,42 +1,28 @@
+
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
-// Helper to get env vars with support for standard, CRA (REACT_APP_) and Vite (VITE_) prefixes
-const getEnv = (key: string) => {
-  let value = undefined;
-  
-  // 1. Try import.meta.env for Vite
-  try {
-    // @ts-ignore
-    if (typeof import.meta !== 'undefined' && import.meta.env) {
-      // @ts-ignore
-      value = import.meta.env[key] || import.meta.env[`VITE_${key}`] || import.meta.env[`REACT_APP_${key}`];
-    }
-  } catch (e) {}
-
-  // 2. Try process.env for CRA/Node/Next.js
-  if (!value) {
-    try {
-      if (typeof process !== 'undefined' && process.env) {
-        value = process.env[key] || 
-               process.env[`REACT_APP_${key}`] || 
-               process.env[`VITE_${key}`];
-      }
-    } catch (e) {}
+// Augment ImportMeta to fix TS error regarding 'env' property
+declare global {
+  interface ImportMeta {
+    env: any;
   }
-  
-  return value;
-};
+}
+
+// Initialize Firebase
+// We use guarded access (import.meta.env && ...) to prevent crashes in environments where import.meta.env is undefined.
+// We also include process.env fallbacks for compatibility.
+// Note: We must reference the VITE_ keys explicitly for Vite to perform build-time replacement.
 
 const firebaseConfig = {
-  apiKey: getEnv("FIREBASE_API_KEY"),
-  authDomain: getEnv("FIREBASE_AUTH_DOMAIN"),
-  projectId: getEnv("FIREBASE_PROJECT_ID"),
-  storageBucket: getEnv("FIREBASE_STORAGE_BUCKET"),
-  messagingSenderId: getEnv("FIREBASE_MESSAGING_SENDER_ID"),
-  appId: getEnv("FIREBASE_APP_ID"),
-  measurementId: getEnv("FIREBASE_MEASUREMENT_ID")
+  apiKey: (import.meta.env && import.meta.env.VITE_FIREBASE_API_KEY) || (typeof process !== 'undefined' && process.env && process.env.VITE_FIREBASE_API_KEY),
+  authDomain: (import.meta.env && import.meta.env.VITE_FIREBASE_AUTH_DOMAIN) || (typeof process !== 'undefined' && process.env && process.env.VITE_FIREBASE_AUTH_DOMAIN),
+  projectId: (import.meta.env && import.meta.env.VITE_FIREBASE_PROJECT_ID) || (typeof process !== 'undefined' && process.env && process.env.VITE_FIREBASE_PROJECT_ID),
+  storageBucket: (import.meta.env && import.meta.env.VITE_FIREBASE_STORAGE_BUCKET) || (typeof process !== 'undefined' && process.env && process.env.VITE_FIREBASE_STORAGE_BUCKET),
+  messagingSenderId: (import.meta.env && import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID) || (typeof process !== 'undefined' && process.env && process.env.VITE_FIREBASE_MESSAGING_SENDER_ID),
+  appId: (import.meta.env && import.meta.env.VITE_FIREBASE_APP_ID) || (typeof process !== 'undefined' && process.env && process.env.VITE_FIREBASE_APP_ID),
+  measurementId: (import.meta.env && import.meta.env.VITE_FIREBASE_MEASUREMENT_ID) || (typeof process !== 'undefined' && process.env && process.env.VITE_FIREBASE_MEASUREMENT_ID)
 };
 
 let app;
@@ -53,7 +39,7 @@ if (firebaseConfig.apiKey) {
     console.error("Firebase Initialization Error:", error);
   }
 } else {
-  console.warn("Firebase Config missing. Please set VITE_FIREBASE_API_KEY in your environment.");
+  console.warn("Firebase Config missing. VITE_FIREBASE_API_KEY not found in environment.");
 }
 
 export { auth, db };

@@ -1,35 +1,21 @@
+
 import { GoogleGenAI } from "@google/genai";
 
-const getApiKey = () => {
-  let key = undefined;
-  
-  // 1. Try import.meta.env for Vite
-  try {
-    // @ts-ignore
-    if (typeof import.meta !== 'undefined' && import.meta.env) {
-      // @ts-ignore
-      key = import.meta.env.API_KEY || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.REACT_APP_GEMINI_API_KEY;
-    }
-  } catch (e) {}
-
-  // 2. Try process.env
-  if (!key) {
-    try {
-      if (typeof process !== 'undefined' && process.env) {
-        key = process.env.API_KEY || process.env.REACT_APP_GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
-      }
-    } catch (e) {}
-  }
-  
-  return key || "";
+// Declare process to avoid TS errors if not defined in types
+declare var process: {
+  env: {
+    API_KEY: string;
+  };
 };
 
-const apiKey = getApiKey();
-
 export async function callGemini(prompt: string, imageBase64?: string) {
+  // The API key must be obtained exclusively from the environment variable process.env.API_KEY
+  // We use a safe check to avoid crashing if 'process' is undefined in the browser
+  const apiKey = typeof process !== 'undefined' && process.env ? process.env.API_KEY : undefined;
+
   if (!apiKey) {
-    console.warn("Gemini API Key not found in env");
-    return "API Key Missing. Please configure VITE_GEMINI_API_KEY in Vercel environment variables.";
+    console.warn("Gemini API Key not found in process.env.API_KEY");
+    return "API Key Missing. Please configure process.env.API_KEY.";
   }
 
   try {
