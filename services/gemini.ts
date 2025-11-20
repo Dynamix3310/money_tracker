@@ -93,3 +93,54 @@ export async function callGemini(prompt: string, imageBase64?: string) {
     return "AI 暫時無法回應，請稍後再試。";
   }
 }
+
+export async function fetchPriceWithAI(symbol: string): Promise<number | null> {
+  // Logic to get key (duplicated from callGemini to ensure robustness)
+  let apiKey: string | undefined;
+  const auth = getAuth();
+  const currentUser = auth.currentUser;
+  const userEmail = currentUser?.email;
+  const isAllowedUser = userEmail && ADMIN_EMAILS.includes(userEmail);
+  const userCustomKey = localStorage.getItem('user_gemini_key');
+
+  if (isAllowedUser) {
+      if (import.meta.env) {
+        if (import.meta.env.VITE_GEMINI_API_KEY) apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+        else if (import.meta.env.API_KEY) apiKey = import.meta.env.API_KEY;
+      }
+      if (!apiKey && typeof process !== 'undefined' && process.env) {
+         if (process.env.VITE_GEMINI_API_KEY) apiKey = process.env.VITE_GEMINI_API_KEY;
+         else if (process.env.API_KEY) apiKey = process.env.API_KEY;
+      }
+  } else {
+      if (userCustomKey) apiKey = userCustomKey;
+  }
+
+  if (!apiKey) return null;
+
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    // Using googleSearch tool
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: `Search for the current stock price of "${symbol}". If the symbol contains numbers like 1475 or 7203, it is likely a Japanese stock code. Return ONLY the numeric value of the price (e.g. 1234.5). Do not return currency symbols or other text.`,
+        config: {
+            tools: [{googleSearch: {}}]
+        }
+    });
+    
+    const text = response.text;
+    if(!text) return null;
+    
+    // Try to extract a number
+    const match = text.match(/[\d,]+\.?\d*/); 
+    if(match) {
+        const num = parseFloat(match[0].replace(/,/g, ''));
+        return isNaN(num) ? null : num;
+    }
+    return null;
+  } catch (e) {
+    console.error("AI Price Fetch Error", e);
+    return null;
+  }
+}
