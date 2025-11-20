@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
@@ -320,16 +319,33 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden relative">
       <header className="bg-slate-900 text-white pb-2 pt-safe z-20 shadow-md">
+         {/* Branding Row */}
+         <div className="px-4 pt-4 pb-2 flex justify-between items-center border-b border-slate-800/50">
+            <div className="flex items-center gap-2.5 text-white">
+                <div className="bg-indigo-600 p-1.5 rounded-lg shadow-lg shadow-indigo-500/30">
+                    <Wallet size={18} className="text-white"/>
+                </div>
+                <span className="font-bold text-lg tracking-tight">WealthFlow</span>
+            </div>
+            <button onClick={()=>setActiveModal('settings')} className="text-slate-400 hover:text-white transition-colors p-1 rounded-full hover:bg-slate-800">
+                <Settings size={20}/>
+            </button>
+         </div>
+         
+         {/* Controls Row */}
          <div className="px-4 py-2 flex justify-between items-center text-xs text-slate-400 border-b border-slate-800">
              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500">{currentGroupId === user.uid ? '個人帳本' : '群組帳本'}</span>
-                <select value={baseCurrency} onChange={e=>setBaseCurrency(e.target.value)} className="bg-slate-800 rounded px-2 py-0.5 text-white text-xs outline-none">
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">{currentGroupId === user.uid ? '個人帳本' : '群組帳本'}</span>
+                <select value={baseCurrency} onChange={e=>setBaseCurrency(e.target.value)} className="bg-slate-800 rounded px-2 py-0.5 text-white text-xs outline-none border border-slate-700 focus:border-indigo-500">
                    {ALLOWED_CURRENCIES.map(c=><option key={c} value={c}>{c}</option>)}
                 </select>
              </div>
-             <button onClick={()=>setActiveModal('settings')}><Settings size={14}/></button>
          </div>
-         <div className="px-6 py-5"><div className="text-slate-400 text-xs mb-1">總資產淨值 ({baseCurrency})</div><div className="text-3xl font-bold text-white">{CURRENCY_SYMBOLS[baseCurrency]} {Math.round(totalNetWorth).toLocaleString()}</div></div>
+
+         <div className="px-6 py-5">
+             <div className="text-slate-400 text-xs mb-1 flex items-center gap-1">總資產淨值 ({baseCurrency})</div>
+             <div className="text-3xl font-bold text-white tracking-tight">{CURRENCY_SYMBOLS[baseCurrency]} {Math.round(totalNetWorth).toLocaleString()}</div>
+         </div>
       </header>
 
       <main className="flex-1 overflow-y-auto pb-24 scroll-smooth bg-slate-50/50">

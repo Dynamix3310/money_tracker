@@ -486,7 +486,7 @@ export const CardDetailModal = ({ userId, card, cardLogs, transactions, allCardL
       if(!l.date?.seconds) return false;
       const d = new Date((l.date.seconds as number)*1000);
       return d >= currentCycleStart && d <= currentCycleEnd;
-   }).sort((a:any,b:any) => (b.date.seconds as number) - (a.date.seconds as number));
+   }).sort((a:any,b:any) => ((b.date?.seconds as number)||0) - ((a.date?.seconds as number)||0));
    const handleSaveLog = async () => {
       if(!amt || !desc) return;
       const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));
@@ -583,7 +583,7 @@ export const BankDetailModal = ({ userId, account, logs, onClose, onImport }: an
    };
    
    const groupedLogs = logs.sort((a:any,b:any)=>((b.date?.seconds as number)||0)-((a.date?.seconds as number)||0)).reduce((acc:any, log:any) => {
-      const d = log.date?.seconds ? new Date(log.date.seconds*1000) : new Date();
+      const d = log.date?.seconds ? new Date((log.date.seconds as number)*1000) : new Date();
       const key = `${d.getFullYear()}年${d.getMonth()+1}月`;
       if(!acc[key]) acc[key] = [];
       acc[key].push(log);
