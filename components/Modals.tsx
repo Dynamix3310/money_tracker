@@ -131,7 +131,7 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
   const [activeTab, setActiveTab] = useState('general');
   const [newCat, setNewCat] = useState('');
   const [catType, setCatType] = useState<'expense'|'income'>('expense');
-  const [newCatBudget, setNewCatBudget] = useState(''); // New State for Budget
+  const [newCatBudget, setNewCatBudget] = useState(''); 
   
   const [finnhubKey, setFinnhubKey] = useState(localStorage.getItem('finnhub_key') || '');
   const [geminiKey, setGeminiKey] = useState(localStorage.getItem('user_gemini_key') || '');
@@ -519,7 +519,7 @@ export const ManagePlatformCashModal = ({ platform, userId, onClose }: any) => {
 export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
    const [symbol, setSymbol] = useState(''); const [qty, setQty] = useState<string>(''); const [cost, setCost] = useState<string>(''); const [platformId, setPlatformId] = useState(platforms[0]?.id || ''); const [type, setType] = useState<'stock'|'crypto'>('stock'); const [deductCash, setDeductCash] = useState(true);
    const handleSave = async () => { if(!symbol || !qty || !cost || !platformId) return; const totalCost = parseFloat(cost as string) * parseFloat(qty as string); const platform = platforms.find((p:any) => p.id === platformId); await addDoc(collection(db, getCollectionPath(userId, null, 'holdings')), { symbol: symbol.toUpperCase(), quantity: parseFloat(qty as string), avgCost: parseFloat(cost as string), currentPrice: parseFloat(cost as string), currency: platform?.currency || 'USD', type, platformId }); if(deductCash && platform) { await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platformId), { balance: platform.balance - totalCost }); } onClose(); };
-   return ( <div className={styles.overlay}><div className={styles.content}> <h3 className="font-bold text-xl mb-4">新增資產</h3> <div className="space-y-4"> <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={()=>setType('stock')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='stock'?'bg-white shadow text-blue-600':'text-slate-400'}`}>股票</button><button onClick={()=>setType('crypto')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='crypto'?'bg-white shadow text-orange-600':'text-slate-400'}`}>加密貨幣</button></div> <div> <label className={styles.label}>選擇平台</label> <select className={styles.input} value={platformId} onChange={e=>setPlatformId(e.target.value)}> {platforms.map((p:any) => <option key={p.id} value={p.id}>{p.name} ({p.currency})</option>)} </select> </div> {platformId && <div className="flex items-center gap-2 px-2"> <input type="checkbox" checked={deductCash} onChange={e=>setDeductCash(e.target.checked)} id="dc" className="w-4 h-4 text-indigo-600 rounded"/> <label htmlFor="dc" className="text-sm font-bold text-slate-600">從平台餘額扣款</label> </div>} <div><label className={styles.label}>代號</label><input placeholder="例如: AAPL, BTC" className={styles.input} value={symbol} onChange={e=>setSymbol(e.target.value)} /></div> <div className="grid grid-cols-2 gap-3"> <div><label className={styles.label}>數量</label><input type="number" className={styles.input} value={qty} onChange={e=>setQty(e.target.value)} /></div> <div><label className={styles.label}>平均成本 (單價)</label><input type="number" className={styles.input} value={cost} onChange={e=>setCost(e.target.value)} /></div> </div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div> </div> </div></div> )
+   return ( <div className={styles.overlay}><div className={styles.content}> <h3 className="font-bold text-xl mb-4">新增資產</h3> <div className="space-y-4"> <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={()=>setType('stock')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='stock'?'bg-white shadow text-blue-600':'text-slate-400'}`}>股票</button><button onClick={()=>setType('crypto')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='crypto'?'bg-white shadow text-orange-600':'text-slate-400'}`}>加密貨幣</button></div> <div> <label className={styles.label}>選擇平台</label> <select className={styles.input} value={platformId} onChange={e=>setPlatformId(e.target.value)}> {platforms.map((p:any) => <option key={p.id} value={p.id}>{p.name} ({p.currency})</option>)} </select> </div> {platformId && <div className="flex items-center gap-2 px-2"> <input type="checkbox" checked={deductCash} onChange={e=>setDeductCash(e.target.checked)} id="dc" className="w-4 h-4 text-indigo-600 rounded"/> <label htmlFor="dc" className="text-sm font-bold text-slate-600">從平台餘額扣款</label> </div>} <div><label className={styles.label}>代號</label><input placeholder="例如: AAPL, 2330.TW, 7203.T" className={styles.input} value={symbol} onChange={e=>setSymbol(e.target.value)} /></div> <div className="grid grid-cols-2 gap-3"> <div><label className={styles.label}>數量</label><input type="number" className={styles.input} value={qty} onChange={e=>setQty(e.target.value)} /></div> <div><label className={styles.label}>平均成本 (單價)</label><input type="number" className={styles.input} value={cost} onChange={e=>setCost(e.target.value)} /></div> </div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div> </div> </div></div> )
 }
 
 export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
@@ -551,7 +551,7 @@ export const TransferModal = ({ userId, accounts, onClose }: any) => {
    return ( <div className={styles.overlay}><div className={styles.content}> <h3 className="font-bold text-xl mb-4">轉帳</h3> <div className="space-y-4"> <div className="flex items-center gap-2"> <div className="flex-1"><label className={styles.label}>轉出帳戶</label><select className={styles.input} value={fromId} onChange={e=>setFromId(e.target.value)}>{accounts.map((a:any)=><option key={a.id} value={a.id}>{a.name} (${a.currentBalance})</option>)}</select></div> <ArrowRightLeft className="text-slate-300 mt-4"/> <div className="flex-1"><label className={styles.label}>轉入帳戶</label><select className={styles.input} value={toId} onChange={e=>setToId(e.target.value)}>{accounts.map((a:any)=><option key={a.id} value={a.id}>{a.name} (${a.currentBalance})</option>)}</select></div> </div> <div><label className={styles.label}>金額</label><input type="number" className={styles.input} value={amount} onChange={e=>setAmount(e.target.value)} /></div> <div><label className={styles.label}>備註</label><input className={styles.input} value={desc} onChange={e=>setDesc(e.target.value)} /></div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認轉帳</button></div> </div> </div></div> )
 }
 
-export const BankDetailModal = ({ userId, account, logs, onClose }: any) => {
+export const BankDetailModal = ({ userId, account, logs, onClose, onImport }: any) => {
    const [amount, setAmount] = useState(''); 
    const [type, setType] = useState<'in'|'out'>('out'); 
    const [desc, setDesc] = useState('');
@@ -569,6 +569,18 @@ export const BankDetailModal = ({ userId, account, logs, onClose }: any) => {
        setAmount(''); setDesc(''); 
    };
    const handleDelete = async (id: string) => { if(confirm('確定刪除此紀錄?')) await deleteDoc(doc(db, getCollectionPath(userId, null, 'bankLogs'), id)); };
+   const handleExport = () => {
+      if(logs.length === 0) { alert('無資料可匯出'); return; }
+      const headers = ['Date', 'Type', 'Amount', 'Description', 'Account'];
+      const rows = logs.map((l:any) => {
+          const d = l.date?.seconds ? new Date(l.date.seconds*1000).toISOString().split('T')[0] : '';
+          return [d, l.type, l.amount, l.description, account.name];
+      });
+      const csvContent = [headers.join(','), ...rows.map((r:any) => r.join(','))].join('\n');
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `${account.name}_logs.csv`; a.click();
+   };
    
    const groupedLogs = logs.sort((a:any,b:any)=>((b.date?.seconds as number)||0)-((a.date?.seconds as number)||0)).reduce((acc:any, log:any) => {
       const d = log.date?.seconds ? new Date(log.date.seconds*1000) : new Date();
@@ -582,27 +594,37 @@ export const BankDetailModal = ({ userId, account, logs, onClose }: any) => {
    return ( 
      <div className={styles.overlay}>
        <div className={styles.content}> 
-         <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">{account.name}</h3><button onClick={onClose}><X/></button></div> 
-         <div className="bg-slate-50 p-4 rounded-xl mb-4 text-center"> <div className="text-xs text-slate-400">目前餘額</div> <div className="text-3xl font-bold text-slate-800">${account.currentBalance?.toLocaleString()}</div> </div> 
-         <div className="flex flex-col gap-2 mb-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
+         <div className="flex justify-between items-center mb-4">
+             <h3 className="font-bold text-xl">{account.name}</h3>
              <div className="flex gap-2">
-                 <select className="w-20 rounded-xl border px-2 bg-white text-sm" value={type} onChange={(e:any)=>setType(e.target.value)}><option value="out">支出</option><option value="in">收入</option></select>
-                 <input type="date" className="flex-1 rounded-xl border px-3 py-2 text-sm" value={date} onChange={e=>setDate(e.target.value)} />
-             </div>
-             <div className="flex gap-2">
-                 <input placeholder="金額" type="number" className="w-24 rounded-xl border px-3 py-2 text-sm" value={amount} onChange={e=>setAmount(e.target.value)} />
-                 <input placeholder="備註" className="flex-1 rounded-xl border px-3 py-2 text-sm" value={desc} onChange={e=>setDesc(e.target.value)} />
-                 <button onClick={handleSave} className="bg-indigo-600 text-white px-4 rounded-xl font-bold text-sm">存</button>
+                 <button onClick={handleExport} className="p-2 text-slate-400 hover:text-indigo-600 bg-slate-50 rounded-full" title="匯出"><Download size={18}/></button>
+                 <button onClick={onImport} className="p-2 text-slate-400 hover:text-indigo-600 bg-slate-50 rounded-full" title="匯入"><Upload size={18}/></button>
+                 <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-full"><X size={20}/></button>
              </div>
          </div> 
-         <div className="space-y-4 max-h-[40vh] overflow-y-auto"> 
-           {logs.length === 0 && <div className="text-center text-slate-300 py-4">無紀錄</div>}
+         <div className="bg-slate-50 p-4 rounded-xl mb-4 text-center"> <div className="text-xs text-slate-400">目前餘額</div> <div className="text-3xl font-bold text-slate-800">${account.currentBalance?.toLocaleString()}</div> </div> 
+         <div className="flex flex-col gap-2 mb-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+             <div className="text-xs font-bold text-indigo-600 mb-1">新增流水帳</div>
+             <div className="flex gap-2">
+                 <select className="w-24 rounded-lg border px-2 bg-slate-50 text-sm h-9" value={type} onChange={(e:any)=>setType(e.target.value)}><option value="out">支出</option><option value="in">收入</option></select>
+                 <input type="date" className="flex-1 rounded-lg border px-3 text-sm h-9" value={date} onChange={e=>setDate(e.target.value)} />
+             </div>
+             <div className="flex gap-2">
+                 <input placeholder="金額" type="number" className="w-24 rounded-lg border px-3 text-sm h-9" value={amount} onChange={e=>setAmount(e.target.value)} />
+                 <input placeholder="備註" className="flex-1 rounded-lg border px-3 text-sm h-9" value={desc} onChange={e=>setDesc(e.target.value)} />
+                 <button onClick={handleSave} className="bg-indigo-600 text-white px-4 rounded-lg font-bold text-sm h-9">存</button>
+             </div>
+         </div> 
+         <div className="space-y-0 max-h-[40vh] overflow-y-auto border rounded-xl border-slate-100"> 
+           {logs.length === 0 && <div className="text-center text-slate-300 py-8">無紀錄</div>}
            {sortedMonths.map((month:any) => (
               <div key={month}>
-                  <div className="text-xs font-bold text-slate-400 mb-2 ml-1">{month}</div>
-                  <div className="space-y-2">
+                  <div className="sticky top-0 bg-slate-50 py-1.5 px-3 border-b border-slate-100 text-xs font-bold text-slate-500 z-10 flex justify-between items-center">
+                      <span>{month}</span>
+                  </div>
+                  <div className="bg-white">
                       {groupedLogs[month].map((l:any) => (
-                         <div key={l.id} className="flex justify-between items-center p-3 border-b last:border-0"> 
+                         <div key={l.id} className="flex justify-between items-center p-3 border-b last:border-0 border-slate-50 hover:bg-slate-50 transition-colors"> 
                             <div> <div className="font-bold text-sm text-slate-700">{l.description}</div> <div className="text-xs text-slate-400">{l.date?.seconds?new Date((l.date.seconds as number)*1000).toLocaleDateString():''}</div> </div> 
                             <div className="flex items-center gap-3"> <div className={`font-bold ${l.type==='in'?'text-emerald-600':'text-slate-800'}`}>{l.type==='in'?'+':''}{l.amount.toLocaleString()}</div> <button onClick={()=>handleDelete(l.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button> </div> 
                          </div>
@@ -624,7 +646,7 @@ export const AIAssistantModal = ({ onClose, contextData }: any) => {
    return ( <div className={styles.overlay}><div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col h-[600px] animate-in zoom-in-95"> <div className="p-4 border-b flex justify-between items-center bg-indigo-600 text-white rounded-t-2xl"> <h3 className="font-bold flex items-center gap-2"><Sparkles size={18}/> AI 財富助手</h3> <button onClick={onClose}><X size={20}/></button> </div> <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50" ref={scrollRef}> {messages.map((m, i) => ( <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}> <div className={`max-w-[80%] p-3 rounded-2xl text-sm leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none shadow-md' : 'bg-white text-slate-800 border border-slate-100 rounded-bl-none shadow-sm'}`}> {m.text} </div> </div> ))} {loading && <div className="flex justify-start"><div className="bg-white p-3 rounded-2xl rounded-bl-none border shadow-sm flex gap-1"><div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></div><div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-75"></div><div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-150"></div></div></div>} </div> <div className="p-3 bg-white border-t rounded-b-2xl flex gap-2"> <input className="flex-1 bg-slate-100 border-0 rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none text-sm" placeholder="輸入問題..." value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSend()} /> <button onClick={handleSend} disabled={loading} className="bg-indigo-600 text-white p-3 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-all"><Send size={20}/></button> </div> </div></div> )
 }
 
-export const AIBatchImportModal = ({ userId, groupId, categories, existingTransactions, accounts, creditCards, existingBankLogs, existingCardLogs, people, onClose }: any) => {
+export const AIBatchImportModal = ({ userId, groupId, categories, existingTransactions, accounts, creditCards, existingBankLogs, existingCardLogs, people, onClose, initialConfig }: any) => {
    const [mode, setMode] = useState<'text'|'image'>('text');
    const [target, setTarget] = useState<'ledger'|'bank'|'card'>('ledger');
    const [targetId, setTargetId] = useState('');
@@ -636,9 +658,14 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
    const [loading, setLoading] = useState(false);
    
    useEffect(() => {
-       if(target === 'bank' && accounts.length > 0) setTargetId(accounts[0].id);
-       if(target === 'card' && creditCards.length > 0) setTargetId(creditCards[0].id);
-   }, [target, accounts, creditCards]);
+       if(initialConfig) {
+           setTarget(initialConfig.target);
+           if(initialConfig.targetId) setTargetId(initialConfig.targetId);
+       } else {
+           if(target === 'bank' && accounts.length > 0) setTargetId(accounts[0].id);
+           if(target === 'card' && creditCards.length > 0) setTargetId(creditCards[0].id);
+       }
+   }, [target, accounts, creditCards, initialConfig]);
 
    const checkDuplicate = (item: any) => {
        const itemDateStr = item.date;

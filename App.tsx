@@ -43,6 +43,9 @@ export default function App() {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<any>(null); 
   const [confirmData, setConfirmData] = useState<{title:string, message:string, action:()=>void} | null>(null);
+  
+  // Batch Import Context
+  const [batchConfig, setBatchConfig] = useState<{target: 'ledger'|'bank'|'card', targetId?: string} | null>(null);
 
   // Data
   const [platforms, setPlatforms] = useState<Platform[]>([]);
@@ -263,8 +266,7 @@ export default function App() {
           // Check if already exists? Firestore allows duplicates, but let's just add
           await addDoc(peopleCol, {
               name: user.displayName || user.email?.split('@')[0] || 'Member',
-              isMe: false, // Relative to group owner? No, in this app 'isMe' is UI flag. 
-              // Ideally we match UID. 
+              isMe: false, 
               uid: user.uid,
               email: user.email
           });
@@ -292,8 +294,6 @@ export default function App() {
   }
 
   // ACCESS CONTROL BLOCK
-  // If the logged-in user is NOT an admin, block the entire application view.
-  // This prevents usage of Firebase (Data), Finnhub (Stocks), and Gemini (AI).
   if (user.email && !ADMIN_EMAILS.includes(user.email)) {
       return (
          <div className="h-screen flex flex-col items-center justify-center bg-slate-50 p-4">
@@ -364,7 +364,7 @@ export default function App() {
       {activeModal === 'settings' && <SettingsModal onClose={()=>setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} currentGroupId={currentGroupId} categories={categories} onAddCategory={(name:string,type:string, budget:number)=>addDoc(collection(db,getCollectionPath(user!.uid,currentGroupId,'categories')),{name,type, budgetLimit: budget||0})} onDeleteCategory={(id:string)=>confirmDelete(async()=>await deleteDoc(doc(db,getCollectionPath(user!.uid,currentGroupId,'categories'),id)), '確定刪除此分類? (需二次確認)')}/>}
       {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={()=>{setActiveModal(null);setSelectedItem(null)}} editData={selectedItem} />}
       
-      {activeModal === 'ai-batch' && <AIBatchImportModal userId={user?.uid} groupId={currentGroupId} categories={categories} existingTransactions={transactions} accounts={accounts} creditCards={creditCards} existingBankLogs={bankLogs} existingCardLogs={cardLogs} people={people} onClose={()=>setActiveModal(null)} />}
+      {activeModal === 'ai-batch' && <AIBatchImportModal initialConfig={batchConfig} userId={user?.uid} groupId={currentGroupId} categories={categories} existingTransactions={transactions} accounts={accounts} creditCards={creditCards} existingBankLogs={bankLogs} existingCardLogs={cardLogs} people={people} onClose={()=>{setActiveModal(null);setBatchConfig(null);}} />}
 
       {/* Recurring Modals */}
       {activeModal === 'manage-recurring' && <ManageRecurringModal rules={recurringRules} onClose={()=>setActiveModal(null)} onAdd={()=>setActiveModal('add-recurring')} onEdit={(r:any)=>{setSelectedItem(r);setActiveModal('add-recurring')}} onDelete={(id:string)=>confirmDelete(async()=>await deleteDoc(doc(db,getCollectionPath(user!.uid,currentGroupId,'recurring'),id)), '確定刪除此固定收支規則?')} />}
@@ -386,7 +386,7 @@ export default function App() {
       {activeModal === 'manage-cards' && <ManageListModal title="管理信用卡" items={creditCards} onClose={()=>setActiveModal(null)} renderItem={(c:any)=>(<div><div className="font-bold">{c.name}</div><div className="text-xs text-slate-500">結帳日: {c.billingDay}</div></div>)} onEdit={(c:any)=>{setSelectedItem(c);setActiveModal('edit-card')}} onDelete={(id:string)=>confirmDelete(async()=>await deleteDoc(doc(db,getCollectionPath(user!.uid,null,'creditCards'),id)), `確定刪除此信用卡? (需二次確認)`)} />}
 
       {activeModal === 'transfer' && <TransferModal userId={user?.uid} accounts={calculatedAccounts} onClose={()=>setActiveModal(null)} />}
-      {activeModal === 'view-bank' && selectedItem && <BankDetailModal userId={user?.uid} account={selectedItem} logs={bankLogs.filter(l=>l.accountId===selectedItem.id)} onClose={()=>{setActiveModal(null);setSelectedItem(null)}} />}
+      {activeModal === 'view-bank' && selectedItem && <BankDetailModal userId={user?.uid} account={selectedItem} logs={bankLogs.filter(l=>l.accountId===selectedItem.id)} onClose={()=>{setActiveModal(null);setSelectedItem(null)}} onImport={() => { setBatchConfig({target: 'bank', targetId: selectedItem.id}); setActiveModal('ai-batch'); }} />}
       {activeModal === 'view-card' && selectedItem && <CardDetailModal userId={user?.uid} card={selectedItem} cardLogs={cardLogs.filter(l=>l.cardId===selectedItem.id)} allCardLogs={cardLogs} transactions={transactions} onClose={()=>{setActiveModal(null);setSelectedItem(null)}} />}
       {showAI && <AIAssistantModal onClose={()=>setShowAI(false)} contextData={{totalNetWorth, holdings, transactions}} />}
       {confirmData && <ConfirmActionModal title={confirmData.title} message={confirmData.message} onConfirm={confirmData.action} onCancel={()=>setConfirmData(null)} />}
