@@ -1,13 +1,15 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
-import { signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy } from 'firebase/firestore';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
 import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles } from 'lucide-react';
-import { auth, db, getCollectionPath } from './services/firebase';
+import { auth, db, getCollectionPath, getUserProfilePath } from './services/firebase';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
 import { ExpensePieChart, CashFlowBarChart, NetWorthAreaChart } from './components/Charts';
 import { SettingsModal, SellAssetModal, AddTransactionModal, AddAssetModal, AddAccountModal, AddCardModal, BankDetailModal, AIAssistantModal, CardDetailModal, TransferModal, EditAssetModal, ConfirmActionModal, AddPlatformModal, ManagePlatformCashModal, ManageListModal, AddRecurringModal, ManageRecurringModal, AIBatchImportModal } from './components/Modals';
 import { PortfolioView, LedgerView, CashView } from './components/Views';
 import { AssetHolding, Platform, BankAccount, BankTransaction, CreditCardInfo, CreditCardLog, Transaction, Person, Category, RecurringRule, NetWorthHistory } from './types';
+import { AuthScreen } from './components/Auth';
 
 const CURRENCY_SYMBOLS: Record<string, string> = { 'TWD': 'NT$', 'USD': '$', 'JPY': '¥', 'EUR': '€', 'CNY': '¥' };
 const ALLOWED_CURRENCIES = ['TWD', 'USD', 'JPY'];
@@ -35,7 +37,6 @@ export default function App() {
   const [baseCurrency, setBaseCurrency] = useState('TWD');
   const [rates, setRates] = useState<Record<string, number>>({ 'TWD': 1, 'USD': 0.032, 'JPY': 4.6 });
   const [showAI, setShowAI] = useState(false);
-  const [finnhubKey, setFinnhubKey] = useState(localStorage.getItem('finnhub_key') || '');
   
   // Modal States
   const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -55,15 +56,38 @@ export default function App() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
 
-  // Init
+  // Safe Check for Firebase Auth
   useEffect(() => {
     if (!auth) {
-        setLoading(false);
-        return;
+       setLoading(false);
+       return;
     }
-    signInAnonymously(auth).catch(console.error);
-    onAuthStateChanged(auth, u => { setUser(u); if (u && !currentGroupId) setCurrentGroupId(u.uid); setLoading(false); });
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      setLoading(false);
+    });
+    return unsubscribe;
   }, []);
+
+  // Listen to User Profile for Group Changes
+  useEffect(() => {
+      if (!user || !db) return;
+      
+      // Subscribe to user profile changes to sync currentGroupId
+      const unsubProfile = onSnapshot(doc(db, getUserProfilePath(user.uid)), (docSnap) => {
+          if (docSnap.exists()) {
+              const data = docSnap.data();
+              if (data.currentGroupId) {
+                  setCurrentGroupId(data.currentGroupId);
+              }
+          } else {
+              // Profile doesn't exist (legacy user?), fall back to UID or create one
+              setCurrentGroupId(user.uid);
+          }
+      });
+
+      return () => unsubProfile();
+  }, [user]);
 
   // Auto Fetch Rates
   useEffect(() => {
@@ -74,7 +98,6 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     const interval = setInterval(() => {
-      console.log("Auto-refreshing asset prices...");
       updateAssetPrices(false);
     }, 15 * 60 * 1000);
     setTimeout(() => updateAssetPrices(false), 3000);
@@ -97,21 +120,18 @@ export default function App() {
           nextDate.setHours(0,0,0,0);
 
           if (nextDate.getTime() <= today.getTime()) {
-              // Trigger Transaction
               const newTrans = {
                   totalAmount: rule.amount,
                   description: `${rule.name} (自動)`,
                   category: rule.category,
                   type: rule.type,
                   payers: {[rule.payerId]: rule.amount},
-                  splitDetails: {[rule.payerId]: rule.amount}, // Simplified split
+                  splitDetails: {[rule.payerId]: rule.amount}, 
                   date: Timestamp.fromDate(new Date()),
                   currency: 'TWD',
                   isRecurring: true
               };
               await addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'transactions')), newTrans);
-
-              // Update Rule Next Date (Add 1 Month)
               const nextMonth = new Date(nextDate);
               nextMonth.setMonth(nextMonth.getMonth() + 1);
               await updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'recurring'), rule.id), {
@@ -124,6 +144,8 @@ export default function App() {
   // Sync Data
   useEffect(() => {
     if (!user || !db) return;
+    
+    // Private Data
     const privateCols = ['platforms', 'holdings', 'accounts', 'bankLogs', 'creditCards', 'cardLogs', 'history'];
     const privateUnsubs = privateCols.map(c => onSnapshot(c==='history'?query(collection(db, getCollectionPath(user.uid, null, c)), orderBy('date','asc')):collection(db, getCollectionPath(user.uid, null, c)), s => {
        const data = s.docs.map(d => ({id: d.id, ...d.data()}));
@@ -136,17 +158,23 @@ export default function App() {
        if(c==='history') setHistoryData(data as NetWorthHistory[]);
     }));
 
-    const groupId = currentGroupId || user.uid;
-    const groupCols = ['transactions', 'people', 'categories', 'recurring'];
-    const groupUnsubs = groupCols.map(c => onSnapshot(collection(db, getCollectionPath(user.uid, groupId, c)), s => {
-       const data = s.docs.map(d => ({id: d.id, ...d.data()}));
-       if(c==='transactions') setTransactions(data as Transaction[]);
-       if(c==='people') { 
-         let pList = data as Person[]; if(pList.length===0 && groupId===user.uid) addDoc(collection(db, getCollectionPath(user.uid, groupId, 'people')), {name:'我', isMe:true}); setPeople(pList); 
-       }
-       if(c==='categories') { if(data.length===0) ['飲食','交通','購物'].forEach(n=>addDoc(collection(db,getCollectionPath(user.uid,groupId,'categories')),{name:n,type:'expense'})); setCategories(data as Category[]); }
-       if(c==='recurring') setRecurringRules(data as RecurringRule[]);
-    }));
+    // Group Data
+    let groupUnsubs: any[] = [];
+    if (currentGroupId) {
+        const groupId = currentGroupId;
+        const groupCols = ['transactions', 'people', 'categories', 'recurring'];
+        
+        groupUnsubs = groupCols.map(c => onSnapshot(collection(db, getCollectionPath(user.uid, groupId, c)), s => {
+           const data = s.docs.map(d => ({id: d.id, ...d.data()}));
+           if(c==='transactions') setTransactions(data as Transaction[]);
+           if(c==='people') { 
+             setPeople(data as Person[]); 
+           }
+           if(c==='categories') { setCategories(data as Category[]); }
+           if(c==='recurring') setRecurringRules(data as RecurringRule[]);
+        }));
+    }
+
     return () => { [...privateUnsubs, ...groupUnsubs].forEach(u => u()); };
   }, [user, currentGroupId]);
 
@@ -165,30 +193,18 @@ export default function App() {
   }, [holdings, platforms, calculatedAccounts, baseCurrency, rates]);
 
   const updateAssetPrices = async (showFeedback = true) => {
-     if(!holdings.length || !user) {
-        if(showFeedback && !holdings.length) alert("無持倉可更新");
-        return;
-     }
+     if(!holdings.length || !user) return;
      let updated = 0;
      let errors = [];
      const currentKey = localStorage.getItem('finnhub_key') || ''; 
      for(const h of holdings) {
         let price = null;
-        if(h.type === 'crypto') {
-           price = await fetchCryptoPrice(h.symbol);
-        } else {
-           price = await fetchStockPrice(h.symbol, currentKey);
-           if(!price) errors.push(h.symbol);
-        }
-        if(price) { 
-          await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price }); 
-          updated++; 
-        }
+        if(h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
+        else { price = await fetchStockPrice(h.symbol, currentKey); if(!price) errors.push(h.symbol); }
+        if(price) { await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price }); updated++; }
      }
-     if(showFeedback) {
-        if(errors.length > 0) alert(`更新完成，但以下代號失敗 (請確認後綴如 .TW): ${errors.join(', ')}`);
-        else alert(`成功更新 ${updated} 筆資產價格`);
-     }
+     if(showFeedback && errors.length > 0) alert(`更新完成，但部分失敗: ${errors.join(', ')}`);
+     else if(showFeedback) alert(`成功更新 ${updated} 筆資產價格`);
   };
 
   const handleImport = async (data: any) => {
@@ -203,7 +219,6 @@ export default function App() {
      setConfirmData({ title: '確認刪除', message: msg, action: () => { action(); setConfirmData(null); } });
   };
 
-  // Handlers
   const handleSellAsset = async (price: number, qty: number) => {
      if(!selectedItem || !user) return;
      const item = selectedItem;
@@ -212,11 +227,7 @@ export default function App() {
      
      const totalReturn = price * qty;
      const platform = platforms.find(p => p.id === item.platformId);
-     if(platform) {
-         await updateDoc(doc(db, getCollectionPath(user.uid, null, 'platforms'), platform.id), {
-             balance: platform.balance + totalReturn
-         });
-     }
+     if(platform) await updateDoc(doc(db, getCollectionPath(user.uid, null, 'platforms'), platform.id), { balance: platform.balance + totalReturn });
      setSelectedItem(null); setActiveModal(null);
   };
 
@@ -227,30 +238,50 @@ export default function App() {
      const a = document.createElement('a'); a.href = url; a.download = `backup.json`; a.click();
   };
 
-  if (!auth) {
-     return (
-       <div className="h-screen flex flex-col items-center justify-center p-8 bg-slate-50 text-slate-700">
-          <Settings size={48} className="text-indigo-400 mb-4"/>
-          <h1 className="text-2xl font-bold mb-2">Configuration Missing</h1>
-          <p className="text-center mb-6 max-w-md text-sm">
-            It seems the API keys are missing. If you are deploying to Vercel, please ensure you have added the Environment Variables (e.g., <code>REACT_APP_FIREBASE_API_KEY</code> or <code>VITE_FIREBASE_API_KEY</code>).
-          </p>
-          <div className="bg-white p-4 rounded-xl shadow border text-xs font-mono text-slate-500">
-             VITE_FIREBASE_API_KEY=...<br/>
-             VITE_FIREBASE_PROJECT_ID=...
-          </div>
-       </div>
-     )
-  }
+  const handleGroupJoin = async (newGroupId: string) => {
+      if (!user) return;
+      if (!newGroupId) return;
 
+      try {
+          // 1. Add user to the target group's people list
+          const peopleCol = collection(db, getCollectionPath(user.uid, newGroupId, 'people'));
+          // Check if already exists? Firestore allows duplicates, but let's just add
+          await addDoc(peopleCol, {
+              name: user.displayName || user.email?.split('@')[0] || 'Member',
+              isMe: false, // Relative to group owner? No, in this app 'isMe' is UI flag. 
+              // Ideally we match UID. 
+              uid: user.uid,
+              email: user.email
+          });
+
+          // 2. Update User Profile to point to this group
+          await updateDoc(doc(db, getUserProfilePath(user.uid)), {
+              currentGroupId: newGroupId
+          });
+          
+          alert('成功切換群組！');
+          setActiveModal(null);
+      } catch (e) {
+          console.error(e);
+          alert('加入群組失敗，請檢查邀請碼是否正確');
+      }
+  };
+
+  // Main Render Logic
+  if (!auth) return <div className="h-screen flex items-center justify-center flex-col gap-4 text-slate-600"><div className="text-xl font-bold">Configuration Error</div><div className="text-sm">Firebase API Key not found in environment variables.</div></div>;
+  
   if (loading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-indigo-600" size={32} /></div>;
+
+  if (!user) {
+      return <AuthScreen />;
+  }
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden relative">
       <header className="bg-slate-900 text-white pb-2 pt-safe z-20 shadow-md">
          <div className="px-4 py-2 flex justify-between items-center text-xs text-slate-400 border-b border-slate-800">
              <div className="flex items-center gap-2">
-                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${currentGroupId!==user?.uid?'bg-indigo-500':'bg-slate-700'}`}>{currentGroupId!==user?.uid?'群組':'個人'}</span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500">{currentGroupId === user.uid ? '個人帳本' : '群組帳本'}</span>
                 <select value={baseCurrency} onChange={e=>setBaseCurrency(e.target.value)} className="bg-slate-800 rounded px-2 py-0.5 text-white text-xs outline-none">
                    {ALLOWED_CURRENCIES.map(c=><option key={c} value={c}>{c}</option>)}
                 </select>
@@ -289,21 +320,10 @@ export default function App() {
       </nav>
 
       {/* Modals */}
-      {activeModal === 'settings' && <SettingsModal onClose={()=>setActiveModal(null)} onExport={exportData} onImport={handleImport} onGroupJoin={setCurrentGroupId} currentGroupId={currentGroupId} categories={categories} onAddCategory={(name:string,type:string)=>addDoc(collection(db,getCollectionPath(user!.uid,currentGroupId,'categories')),{name,type})} onDeleteCategory={(id:string)=>confirmDelete(async()=>await deleteDoc(doc(db,getCollectionPath(user!.uid,currentGroupId,'categories'),id)), '確定刪除此分類? (需二次確認)')}/>}
+      {activeModal === 'settings' && <SettingsModal onClose={()=>setActiveModal(null)} onExport={exportData} onImport={handleImport} onGroupJoin={handleGroupJoin} currentGroupId={currentGroupId} categories={categories} onAddCategory={(name:string,type:string)=>addDoc(collection(db,getCollectionPath(user!.uid,currentGroupId,'categories')),{name,type})} onDeleteCategory={(id:string)=>confirmDelete(async()=>await deleteDoc(doc(db,getCollectionPath(user!.uid,currentGroupId,'categories'),id)), '確定刪除此分類? (需二次確認)')}/>}
       {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={()=>{setActiveModal(null);setSelectedItem(null)}} editData={selectedItem} />}
       
-      {activeModal === 'ai-batch' && <AIBatchImportModal 
-          userId={user?.uid} 
-          groupId={currentGroupId} 
-          categories={categories} 
-          existingTransactions={transactions}
-          accounts={accounts}
-          creditCards={creditCards}
-          existingBankLogs={bankLogs}
-          existingCardLogs={cardLogs} 
-          people={people} 
-          onClose={()=>setActiveModal(null)} 
-      />}
+      {activeModal === 'ai-batch' && <AIBatchImportModal userId={user?.uid} groupId={currentGroupId} categories={categories} existingTransactions={transactions} accounts={accounts} creditCards={creditCards} existingBankLogs={bankLogs} existingCardLogs={cardLogs} people={people} onClose={()=>setActiveModal(null)} />}
 
       {/* Recurring Modals */}
       {activeModal === 'manage-recurring' && <ManageRecurringModal rules={recurringRules} onClose={()=>setActiveModal(null)} onAdd={()=>setActiveModal('add-recurring')} onEdit={(r:any)=>{setSelectedItem(r);setActiveModal('add-recurring')}} onDelete={(id:string)=>confirmDelete(async()=>await deleteDoc(doc(db,getCollectionPath(user!.uid,currentGroupId,'recurring'),id)), '確定刪除此固定收支規則?')} />}
@@ -336,6 +356,7 @@ export default function App() {
 function NavBtn({ icon, label, active, onClick }: any) {
    return (<button onClick={onClick} className={`flex flex-col items-center justify-center w-full h-full ${active?'text-emerald-600 scale-105':'text-slate-400'}`}><div className={`mb-1 ${active?'-translate-y-1':''}`}>{icon}</div><span className="text-[10px] font-bold">{label}</span></button>)
 }
+
 function getMonthlyCashFlow(transactions: any[], baseCurrency: string, rates: any) {
     const now = new Date(); const months = [];
     for(let i=5; i>=0; i--) { const d = new Date(now.getFullYear(), now.getMonth()-i, 1); months.push({ label: `${d.getMonth()+1}月`, month: d.getMonth(), year: d.getFullYear(), income: 0, expense: 0 }); }

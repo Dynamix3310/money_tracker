@@ -44,17 +44,21 @@ if (firebaseConfig.apiKey) {
 
 export { auth, db };
 
+const APP_ID = 'wealthflow-stable-restore';
+
 // Helper to determine collection path based on context (private vs group)
 export const getCollectionPath = (userId: string, groupId: string | null, collectionName: string) => {
-  const appId = 'wealthflow-stable-restore';
   // Assets are ALWAYS private
   if (['holdings', 'platforms', 'accounts', 'bankLogs', 'creditCards', 'cardLogs', 'history'].includes(collectionName)) {
-    return `artifacts/${appId}/users/${userId}/${collectionName}`;
+    return `artifacts/${APP_ID}/users/${userId}/${collectionName}`;
   }
   // Ledger items depend on Group context
   if (groupId) {
-    return `artifacts/${appId}/groups/${groupId}/${collectionName}`;
+    return `artifacts/${APP_ID}/groups/${groupId}/${collectionName}`;
   }
   // Default to private ledger if no group
-  return `artifacts/${appId}/users/${userId}/${collectionName}`;
+  return `artifacts/${APP_ID}/users/${userId}/${collectionName}`;
 };
+
+export const getUserProfilePath = (uid: string) => `artifacts/${APP_ID}/users/${uid}`;
+export const getGroupMetaPath = (groupId: string) => `artifacts/${APP_ID}/groups/${groupId}`;

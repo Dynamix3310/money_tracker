@@ -68,6 +68,7 @@ export interface Person {
   id: string;
   name: string;
   isMe: boolean;
+  email?: string; // Added to link auth user to person
 }
 
 export interface Category {
@@ -105,4 +106,11 @@ export interface AppState {
   currentGroupId: string | null;
   baseCurrency: string;
   rates: Record<string, number>;
+}
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  currentGroupId: string;
+  name?: string;
 }
