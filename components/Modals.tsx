@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users } from 'lucide-react';
+import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator } from 'lucide-react';
 import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog, Transaction, ChatMessage, BankAccount } from '../types';
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc } from 'firebase/firestore';
 import { db, getCollectionPath, auth } from '../services/firebase';
@@ -238,7 +238,7 @@ export const SettingsModal = ({ onClose, onExport, onImport, currentGroupId, cat
   );
 }
 
-// --- Transactions (Updated for Splits) ---
+// --- Transactions (Updated for Advanced Split) ---
 export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData }: any) => {
    const [type, setType] = useState<'expense'|'income'>(editData?.type || 'expense');
    const [amount, setAmount] = useState(editData?.totalAmount?.toString() || '');
@@ -246,12 +246,52 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
    const [category, setCategory] = useState(editData?.category || '');
    const [date, setDate] = useState(editData?.date?.seconds ? new Date(editData.date.seconds*1000).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
    
-   // Default to 'Me' or first person
-   const [payerId, setPayerId] = useState(editData ? Object.keys(editData.payers)[0] : (people.find((p:any)=>p.isMe||p.uid===auth.currentUser?.uid)?.id || people[0]?.id || ''));
+   // Split & Payer Mode States
+   const [payerMode, setPayerMode] = useState<'single'|'multi'>('single');
+   const [splitMode, setSplitMode] = useState<'equal'|'custom'>('equal');
+   
+   // Data holding for advanced modes
+   const [mainPayerId, setMainPayerId] = useState(editData ? Object.keys(editData.payers)[0] : (people.find((p:any)=>p.isMe||p.uid===auth.currentUser?.uid)?.id || people[0]?.id || ''));
+   const [multiPayers, setMultiPayers] = useState<Record<string, string>>(
+      editData && Object.keys(editData.payers).length > 1 
+      ? Object.fromEntries(Object.entries(editData.payers).map(([k,v]:any)=>[k, v.toString()]))
+      : {}
+   );
+   
+   const [customSplits, setCustomSplits] = useState<Record<string, string>>(
+      editData && editData.splitDetails
+      ? Object.fromEntries(Object.entries(editData.splitDetails).map(([k,v]:any)=>[k, v.toString()]))
+      : {}
+   );
+
    const [loadingAI, setLoadingAI] = useState(false);
    
+   // Determine initial modes based on editData
+   useEffect(() => {
+      if(editData) {
+          if(Object.keys(editData.payers).length > 1) setPayerMode('multi');
+          
+          // Simple heuristic for equal split: variance is low
+          const values: number[] = Object.values(editData.splitDetails);
+          if(values.length > 0) {
+              const min = Math.min(...values);
+              const max = Math.max(...values);
+              if(max - min > 1) setSplitMode('custom'); // If difference is more than 1 dollar, treat as custom
+          }
+      }
+   }, []);
+
    const currentCats = categories.filter((c:any) => c.type === type);
    useEffect(() => { if(currentCats.length > 0 && !category) setCategory(currentCats[0].name); }, [type, categories]);
+
+   // Calculations for validation
+   const totalAmountVal = parseFloat(amount) || 0;
+   
+   const payerSum = payerMode === 'single' ? totalAmountVal : Object.values(multiPayers).reduce((acc, val) => acc + (parseFloat(val as string)||0), 0);
+   const splitSum = splitMode === 'equal' ? totalAmountVal : Object.values(customSplits).reduce((acc, val) => acc + (parseFloat(val as string)||0), 0);
+   
+   const isValidPayer = Math.abs(payerSum - totalAmountVal) < 1;
+   const isValidSplit = Math.abs(splitSum - totalAmountVal) < 1;
 
    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]; if (!file) return; setLoadingAI(true);
@@ -272,16 +312,34 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
 
    const handleSave = async () => {
       if(!amount || !description) return;
-      const finalAmt = parseFloat(amount);
       
-      // Split Logic: Equal split among all people for now
-      // (Future improvement: UI for unequal splits)
-      const splitAmt = finalAmt / (people.length||1);
-      const splits: any = {}; 
-      people.forEach((p:any) => splits[p.id] = splitAmt);
+      if(type === 'expense') {
+        if(!isValidPayer) { alert(`付款金額總和 (${payerSum}) 不等於總金額 (${totalAmountVal})`); return; }
+        if(!isValidSplit) { alert(`分帳金額總和 (${splitSum}) 不等於總金額 (${totalAmountVal})`); return; }
+      }
+
+      const finalAmt = totalAmountVal;
       
-      // Payer: Currently supports single payer in UI
-      const payers = {[payerId]: finalAmt};
+      // Construct Payers
+      let payers: Record<string, number> = {};
+      if(payerMode === 'single') {
+          payers[mainPayerId] = finalAmt;
+      } else {
+          Object.entries(multiPayers).forEach(([pid, val]) => {
+             if(parseFloat(val as string) > 0) payers[pid] = parseFloat(val as string);
+          });
+      }
+
+      // Construct Splits
+      let splits: Record<string, number> = {};
+      if(splitMode === 'equal') {
+          const splitAmt = finalAmt / (people.length||1);
+          people.forEach((p:any) => splits[p.id] = splitAmt);
+      } else {
+          Object.entries(customSplits).forEach(([pid, val]) => {
+             if(parseFloat(val as string) > 0) splits[pid] = parseFloat(val as string);
+          });
+      }
 
       const data = { 
           totalAmount: finalAmt, 
@@ -314,21 +372,100 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                   <button onClick={()=>setType('expense')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='expense'?'bg-white shadow text-red-500':'text-slate-400'}`}>支出</button>
                   <button onClick={()=>setType('income')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='income'?'bg-white shadow text-emerald-600':'text-slate-400'}`}>收入</button>
                </div>
+               
                <div>
                   <label className={styles.label}>金額</label>
                   <input type="number" placeholder="0" className="text-4xl font-bold w-full text-center border-b pb-2 outline-none bg-transparent" value={amount} onChange={e=>setAmount(e.target.value)} />
                </div>
-               <div className="grid grid-cols-2 gap-3">
-                  <div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e=>setDate(e.target.value)} /></div>
-                  <div><label className={styles.label}>{type==='income'?'收款人':'付款人'}</label><select className={styles.input} value={payerId} onChange={e=>setPayerId(e.target.value)}>{people.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-               </div>
-               {people.length > 1 && type === 'expense' && (
-                   <div className="text-xs text-slate-500 text-center bg-slate-50 p-2 rounded">
-                      將自動平分給 {people.length} 位成員
+
+               {/* Payer Section */}
+               {type === 'expense' && (
+                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                       <div className="flex justify-between items-center mb-2">
+                           <label className={styles.label}>付款人 (誰出的錢?)</label>
+                           {people.length > 1 && (
+                               <div className="flex bg-white border rounded-lg p-0.5">
+                                   <button onClick={()=>setPayerMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode==='single'?'bg-indigo-50 text-indigo-600 font-bold':'text-slate-400'}`}>單人</button>
+                                   <button onClick={()=>setPayerMode('multi')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode==='multi'?'bg-indigo-50 text-indigo-600 font-bold':'text-slate-400'}`}>多人</button>
+                               </div>
+                           )}
+                       </div>
+                       
+                       {payerMode === 'single' ? (
+                           <select className={styles.input} value={mainPayerId} onChange={e=>setMainPayerId(e.target.value)}>
+                               {people.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}
+                           </select>
+                       ) : (
+                           <div className="space-y-2">
+                               {people.map((p:any) => (
+                                   <div key={p.id} className="flex items-center gap-2">
+                                       <span className="text-sm w-16 truncate">{p.name}</span>
+                                       <input 
+                                          type="number" 
+                                          placeholder="0" 
+                                          className="flex-1 p-2 rounded border text-sm" 
+                                          value={multiPayers[p.id] || ''} 
+                                          onChange={e=>{setMultiPayers({...multiPayers, [p.id]: e.target.value})}}
+                                       />
+                                   </div>
+                               ))}
+                               <div className={`text-xs text-right font-bold ${isValidPayer?'text-emerald-500':'text-red-500'}`}>
+                                   合計: {Math.round(payerSum)} / 目標: {totalAmountVal}
+                               </div>
+                           </div>
+                       )}
                    </div>
                )}
+
+               {/* Split Section */}
+               {type === 'expense' && people.length > 1 && (
+                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                       <div className="flex justify-between items-center mb-2">
+                           <label className={styles.label}>分帳方式 (誰該出?)</label>
+                           <div className="flex bg-white border rounded-lg p-0.5">
+                               <button onClick={()=>setSplitMode('equal')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode==='equal'?'bg-indigo-50 text-indigo-600 font-bold':'text-slate-400'}`}>平分</button>
+                               <button onClick={()=>setSplitMode('custom')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode==='custom'?'bg-indigo-50 text-indigo-600 font-bold':'text-slate-400'}`}>自訂</button>
+                           </div>
+                       </div>
+                       
+                       {splitMode === 'equal' ? (
+                           <div className="text-center text-xs text-slate-500 py-2 bg-white rounded-lg border border-dashed">
+                               每人負擔約 <span className="font-bold text-indigo-600">${(totalAmountVal / people.length).toFixed(1)}</span>
+                           </div>
+                       ) : (
+                           <div className="space-y-2">
+                               {people.map((p:any) => (
+                                   <div key={p.id} className="flex items-center gap-2">
+                                       <span className="text-sm w-16 truncate">{p.name}</span>
+                                       <input 
+                                          type="number" 
+                                          placeholder="0" 
+                                          className="flex-1 p-2 rounded border text-sm" 
+                                          value={customSplits[p.id] || ''} 
+                                          onChange={e=>{setCustomSplits({...customSplits, [p.id]: e.target.value})}}
+                                       />
+                                   </div>
+                               ))}
+                               <div className={`text-xs text-right font-bold ${isValidSplit?'text-emerald-500':'text-red-500'}`}>
+                                   合計: {Math.round(splitSum)} / 目標: {totalAmountVal}
+                               </div>
+                           </div>
+                       )}
+                   </div>
+               )}
+
                <div><label className={styles.label}>項目說明</label><input placeholder="例如: 午餐" className={styles.input} value={description} onChange={e=>setDescription(e.target.value)} /></div>
-               <div><label className={styles.label}>分類</label><div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">{currentCats.map((c:any)=><button key={c.id} onClick={()=>setCategory(c.name)} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap border ${category===c.name?'bg-indigo-600 text-white':'bg-slate-50'}`}>{c.name}</button>)}</div></div>
+               
+               <div className="grid grid-cols-2 gap-3">
+                  <div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e=>setDate(e.target.value)} /></div>
+                  <div>
+                      <label className={styles.label}>分類</label>
+                      <select className={styles.input} value={category} onChange={e=>setCategory(e.target.value)}>
+                          {currentCats.map((c:any)=><option key={c.id} value={c.name}>{c.name}</option>)}
+                      </select>
+                  </div>
+               </div>
+               
                <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div>
             </div>
          </div>
