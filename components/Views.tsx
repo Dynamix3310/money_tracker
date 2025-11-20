@@ -98,6 +98,10 @@ export const LedgerView = ({ transactions, categories, people, onAdd, onBatchAdd
    const filtered = transactions.filter((t: any) => {
        const matchSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase()) || t.category.includes(searchTerm);
        
+       // Apply date filter in stats mode only? No, apply to list too if we want consistency, 
+       // but usually list view implies "all history" with search. 
+       // Let's apply date filter when in STATS mode specifically as requested by prompt.
+       
        if (viewMode === 'stats') {
            if(!t.date?.seconds) return false;
            const d = new Date(t.date.seconds * 1000);

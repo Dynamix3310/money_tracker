@@ -548,8 +548,22 @@ export const TransferModal = ({ userId, accounts, onClose }: any) => {
 }
 
 export const BankDetailModal = ({ userId, account, logs, onClose }: any) => {
-   const [amount, setAmount] = useState(''); const [type, setType] = useState<'in'|'out'>('out'); const [desc, setDesc] = useState('');
-   const handleSave = async () => { if(!amount) return; await addDoc(collection(db, getCollectionPath(userId, null, 'bankLogs')), { accountId: account.id, type, amount: parseFloat(amount), date: serverTimestamp(), description: desc || (type==='in'?'存款':'提款') }); setAmount(''); setDesc(''); };
+   const [amount, setAmount] = useState(''); 
+   const [type, setType] = useState<'in'|'out'>('out'); 
+   const [desc, setDesc] = useState('');
+   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+   const handleSave = async () => { 
+       if(!amount) return; 
+       await addDoc(collection(db, getCollectionPath(userId, null, 'bankLogs')), { 
+           accountId: account.id, 
+           type, 
+           amount: parseFloat(amount), 
+           date: Timestamp.fromDate(new Date(date)), 
+           description: desc || (type==='in'?'存款':'提款') 
+       }); 
+       setAmount(''); setDesc(''); 
+   };
    const handleDelete = async (id: string) => { if(confirm('確定刪除此紀錄?')) await deleteDoc(doc(db, getCollectionPath(userId, null, 'bankLogs'), id)); };
    
    const groupedLogs = logs.sort((a:any,b:any)=>((b.date?.seconds as number)||0)-((a.date?.seconds as number)||0)).reduce((acc:any, log:any) => {
@@ -566,7 +580,17 @@ export const BankDetailModal = ({ userId, account, logs, onClose }: any) => {
        <div className={styles.content}> 
          <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">{account.name}</h3><button onClick={onClose}><X/></button></div> 
          <div className="bg-slate-50 p-4 rounded-xl mb-4 text-center"> <div className="text-xs text-slate-400">目前餘額</div> <div className="text-3xl font-bold text-slate-800">${account.currentBalance?.toLocaleString()}</div> </div> 
-         <div className="flex gap-2 mb-4"> <select className="w-20 rounded-xl border px-2 bg-white" value={type} onChange={(e:any)=>setType(e.target.value)}><option value="out">支出</option><option value="in">收入</option></select> <input placeholder="金額" type="number" className="flex-1 rounded-xl border px-3 py-2" value={amount} onChange={e=>setAmount(e.target.value)} /> <input placeholder="備註" className="flex-1 rounded-xl border px-3 py-2" value={desc} onChange={e=>setDesc(e.target.value)} /> <button onClick={handleSave} className="bg-indigo-600 text-white px-4 rounded-xl font-bold">存</button> </div> 
+         <div className="flex flex-col gap-2 mb-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
+             <div className="flex gap-2">
+                 <select className="w-20 rounded-xl border px-2 bg-white text-sm" value={type} onChange={(e:any)=>setType(e.target.value)}><option value="out">支出</option><option value="in">收入</option></select>
+                 <input type="date" className="flex-1 rounded-xl border px-3 py-2 text-sm" value={date} onChange={e=>setDate(e.target.value)} />
+             </div>
+             <div className="flex gap-2">
+                 <input placeholder="金額" type="number" className="w-24 rounded-xl border px-3 py-2 text-sm" value={amount} onChange={e=>setAmount(e.target.value)} />
+                 <input placeholder="備註" className="flex-1 rounded-xl border px-3 py-2 text-sm" value={desc} onChange={e=>setDesc(e.target.value)} />
+                 <button onClick={handleSave} className="bg-indigo-600 text-white px-4 rounded-xl font-bold text-sm">存</button>
+             </div>
+         </div> 
          <div className="space-y-4 max-h-[40vh] overflow-y-auto"> 
            {logs.length === 0 && <div className="text-center text-slate-300 py-4">無紀錄</div>}
            {sortedMonths.map((month:any) => (
