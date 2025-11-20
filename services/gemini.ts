@@ -11,10 +11,15 @@ declare var process: {
   };
 };
 
-// --- CONFIGURATION ---
-// Add your email here to allow usage of the system API key
-// Replace with your actual email
-const ADMIN_EMAILS = ['admin@example.com', 'me@example.com']; 
+// --- CONFIGURATION / 設定區域 ---
+// 請在此處填入允許使用系統 API Key 的使用者 Email
+// 只有在名單內的 Email 登入後，才能使用環境變數中的 VITE_GEMINI_API_KEY
+// 若不在名單內，系統會要求使用者在「設定」中輸入自己的 Key
+const ADMIN_EMAILS = [
+    'fatibrother@gmail.com', 
+    'lazycancerguy11@gmail.com', // <--- 請將您的 Email 加在這裡
+    'jennyliao26217167@gmail.com'
+]; 
 
 export async function callGemini(prompt: string, imageBase64?: string) {
   // 1. Determine which Key to use
@@ -45,10 +50,10 @@ export async function callGemini(prompt: string, imageBase64?: string) {
   if (!apiKey) {
     if (isAllowedUser) {
         console.warn("System Gemini API Key missing in environment.");
-        return "系統錯誤: 管理員尚未設定環境變數 API Key。";
+        return "系統錯誤: 管理員尚未設定環境變數 API Key (VITE_GEMINI_API_KEY)。";
     } else {
         // Return a specific message prompting the user to set their key
-        return "權限限制: 您的帳號未授權使用系統 API。請在「設定 > API 金鑰」中輸入您自己的 Gemini API Key。";
+        return "權限限制: 您的帳號未授權使用系統 API。請在「設定 > API 金鑰」中輸入您自己的 Gemini API Key，或聯繫管理員將您加入白名單。";
     }
   }
 
