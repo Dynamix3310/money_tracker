@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt } from 'lucide-react';
+import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard } from 'lucide-react';
 import { AssetHolding, Transaction, BankAccount, CreditCardInfo, Person, BankTransaction, CreditCardLog, Platform } from '../types';
 import { ExpensePieChart } from './Charts';
 
@@ -154,6 +154,7 @@ export const LedgerView = ({ transactions, people, onAdd, onBatchAdd, currentGro
             <div className="flex justify-between items-center mb-3">
                <div className="flex items-center gap-2"><div className="bg-indigo-100 text-indigo-600 p-1.5 rounded-lg"><Users size={16}/></div><div><h3 className="font-bold text-sm">{currentGroupId===userId?'個人帳本':'群組帳本'}</h3></div></div>
                <div className="flex gap-2">
+                   <button onClick={onManageRecurring} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors" title="固定收支"><Repeat size={16}/></button>
                    <button onClick={onBatchAdd} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors"><Sparkles size={16}/></button>
                    <div className="flex bg-slate-100 p-1 rounded-lg">
                        <button onClick={()=>setViewMode('list')} className={`p-1.5 rounded ${viewMode==='list'?'bg-white shadow text-slate-800':'text-slate-400'}`}><Calendar size={14}/></button>
@@ -194,10 +195,13 @@ export const LedgerView = ({ transactions, people, onAdd, onBatchAdd, currentGro
                                       </div>
                                       <div className="flex items-center gap-2">
                                          <div className="text-right">
-                                             <div className={`font-bold font-mono ${t.type==='income'?'text-emerald-600':'text-slate-800'}`}>{t.type==='income'?'+':''}{t.totalAmount} $</div>
+                                             <div className={`font-bold font-mono ${t.type==='income'?'text-emerald-600':'text-slate-800'}`}>
+                                                 {t.type==='income'?'+':''}{t.totalAmount.toLocaleString()} <span className="text-xs font-normal text-slate-400">$</span>
+                                             </div>
                                              {myShare > 0 && (
-                                                 <div className="text-[10px] text-slate-500 font-medium">
-                                                     (自付 {Math.round(myShare)})
+                                                 <div className="text-xs text-indigo-600 font-bold mt-0.5">
+                                                     <span className="text-[10px] text-slate-400 font-normal mr-1">自付</span>
+                                                     {Math.round(myShare).toLocaleString()}
                                                  </div>
                                              )}
                                          </div>
@@ -237,44 +241,63 @@ export const LedgerView = ({ transactions, people, onAdd, onBatchAdd, currentGro
                 })}
             </div>
          )}
-
-         {viewMode === 'stats' && (
-             <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-red-50 p-3 rounded-xl border border-red-100">
-                        <div className="text-xs text-red-400 font-bold mb-1">總支出</div>
-                        <div className="text-xl font-bold text-red-600">${statsData.totalExp.toLocaleString()}</div>
-                    </div>
-                    <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
-                        <div className="text-xs text-emerald-400 font-bold mb-1">總收入</div>
-                        <div className="text-xl font-bold text-emerald-600">${statsData.totalInc.toLocaleString()}</div>
-                    </div>
-                </div>
-                <div className="bg-white p-4 rounded-2xl border h-64"><h4 className="font-bold text-sm mb-2">分類統計</h4><ExpensePieChart data={statsData.catChart}/></div>
-                <div className="bg-white p-4 rounded-2xl border h-64"><h4 className="font-bold text-sm mb-2">成員支付統計</h4><ExpensePieChart data={statsData.memChart}/></div>
-             </div>
-         )}
       </div>
-   )
-}
+   );
+};
 
 // --- Cash View ---
-export const CashView = ({ accounts, creditCards, onAddAccount, onAddCard, onManageAccount, onManageCard, onViewAccount, onViewCard, onTransfer }: any) => {
-   // ... (CashView remains same)
+export const CashView = ({ accounts, creditCards, onTransfer, onAddAccount, onManageAccount, onAddCard, onManageCard, onViewAccount, onViewCard }: any) => {
    return (
       <div className="space-y-6 animate-in slide-in-from-bottom-4 pb-20">
-         <section>
-            <div className="flex justify-between items-center mb-3 px-1">
-               <div className="flex items-center gap-2"> <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><Wallet size={18}/> 銀行與現金</h3> <button onClick={onManageAccount} className="text-slate-300 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><Settings size={16}/></button> </div>
-               <div className="flex gap-2"> <button onClick={onTransfer} className="text-indigo-600 text-xs font-bold bg-indigo-50 px-3 py-1.5 rounded-lg flex items-center gap-1"><ArrowRightLeft size={12}/> 轉帳</button> <button onClick={onAddAccount} className="text-emerald-600 text-xs font-bold bg-emerald-50 px-3 py-1.5 rounded-lg flex items-center gap-1"><Plus size={12}/> 新增</button> </div>
+         {/* Accounts Section */}
+         <div>
+            <div className="flex justify-between items-center mb-3">
+               <h3 className="font-bold text-lg text-slate-800">銀行帳戶</h3>
+               <div className="flex gap-2">
+                  <button onClick={onTransfer} className="bg-white border border-slate-200 text-slate-600 p-2 rounded-lg shadow-sm hover:bg-slate-50"><ArrowRightLeft size={16}/></button>
+                  <button onClick={onManageAccount} className="bg-white border border-slate-200 text-slate-600 p-2 rounded-lg shadow-sm hover:bg-slate-50"><Settings size={16}/></button>
+                  <button onClick={onAddAccount} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><Plus size={14}/> 新增</button>
+               </div>
             </div>
-            <div className="space-y-3"> {accounts.length===0 && <div className="text-center text-slate-400 py-6 border-2 border-dashed rounded-xl">尚無帳戶</div>} {accounts.map((a: any) => ( <div key={a.id} onClick={() => onViewAccount(a)} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex justify-between items-center cursor-pointer active:scale-[0.99]"> <div className="flex gap-4 items-center"> <div className="bg-emerald-100 p-3 rounded-xl text-emerald-600"><Wallet size={20}/></div> <div><div className="font-bold text-slate-800 text-base">{a.name}</div><div className="text-[10px] bg-slate-100 px-1.5 rounded mt-1 w-fit">{a.currency}</div></div> </div> <div className="text-right"><div className="font-bold font-mono text-lg">${a.currentBalance?.toLocaleString()}</div><div className="text-[10px] text-emerald-600">明細 &gt;</div></div> </div> ))} </div>
-         </section>
-         <section>
-            <div className="flex justify-between items-center mb-3 px-1"> <div className="flex items-center gap-2"> <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2"><Calendar size={18}/> 信用卡</h3> <button onClick={onManageCard} className="text-slate-300 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><Settings size={16}/></button> </div> <button onClick={onAddCard} className="text-blue-600 text-xs font-bold bg-blue-50 px-3 py-1.5 rounded-lg flex items-center gap-1"><Plus size={12}/> 新增</button> </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"> {creditCards.map((c: any) => ( <div key={c.id} onClick={() => onViewCard(c)} className="bg-gradient-to-br from-slate-800 to-slate-900 text-white p-5 rounded-2xl shadow-lg relative overflow-hidden cursor-pointer active:scale-[0.98]"> <div className="absolute right-0 top-0 p-8 bg-white/5 rounded-full blur-3xl w-32 h-32"></div> <div className="relative z-10"> <div className="flex justify-between"><div className="text-[10px] font-bold text-slate-400 tracking-widest">CARD</div><div className="bg-white/20 p-1 rounded"><CreditCardInfoIcon size={12} /></div></div> <div className="font-bold text-lg mb-6 mt-2">{c.name}</div> <div className="text-xs text-slate-400 bg-slate-800/50 px-2 py-1 rounded-lg w-fit">結帳日: <span className="text-white font-bold">{c.billingDay}</span></div> </div> </div> ))} </div>
-         </section>
+            <div className="grid grid-cols-1 gap-3">
+               {accounts.map((acc: any) => (
+                  <div key={acc.id} onClick={() => onViewAccount(acc)} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-indigo-300 cursor-pointer transition-all">
+                     <div className="flex justify-between items-center">
+                        <div className="font-bold text-slate-700">{acc.name}</div>
+                        <div className="font-mono font-bold text-lg">${acc.currentBalance?.toLocaleString()}</div>
+                     </div>
+                     <div className="text-xs text-slate-400 mt-1">{acc.currency}</div>
+                  </div>
+               ))}
+               {accounts.length === 0 && <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed text-slate-400 text-sm">尚無帳戶</div>}
+            </div>
+         </div>
+
+         {/* Credit Cards Section */}
+         <div>
+            <div className="flex justify-between items-center mb-3">
+               <h3 className="font-bold text-lg text-slate-800">信用卡</h3>
+               <div className="flex gap-2">
+                   <button onClick={onManageCard} className="bg-white border border-slate-200 text-slate-600 p-2 rounded-lg shadow-sm hover:bg-slate-50"><Settings size={16}/></button>
+                   <button onClick={onAddCard} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><Plus size={14}/> 新增</button>
+               </div>
+            </div>
+            <div className="space-y-3">
+               {creditCards.map((card: any) => (
+                  <div key={card.id} onClick={() => onViewCard(card)} className="bg-gradient-to-br from-slate-700 to-slate-900 p-5 rounded-xl text-white shadow-lg cursor-pointer hover:scale-[1.02] transition-transform relative overflow-hidden">
+                     <div className="absolute top-0 right-0 p-4 opacity-10"><CreditCard size={100}/></div>
+                     <div className="relative z-10">
+                         <div className="font-bold text-lg mb-6">{card.name}</div>
+                         <div className="flex justify-between items-end">
+                            <div className="text-xs text-slate-300">結帳日: 每月 {card.billingDay} 號</div>
+                            <div className="text-xs bg-white/20 px-2 py-1 rounded backdrop-blur-sm">查看明細</div>
+                         </div>
+                     </div>
+                  </div>
+               ))}
+                {creditCards.length === 0 && <div className="text-center py-8 bg-slate-50 rounded-xl border border-dashed text-slate-400 text-sm">尚無信用卡</div>}
+            </div>
+         </div>
       </div>
    )
 }
-function CreditCardInfoIcon({size}:{size:number}) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="5" rx="2" /><line x1="2" x2="22" y1="10" y2="10" /></svg> }

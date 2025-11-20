@@ -126,8 +126,8 @@ export default function App() {
                   description: `${rule.name} (自動)`,
                   category: rule.category,
                   type: rule.type,
-                  payers: {[rule.payerId]: rule.amount},
-                  splitDetails: {[rule.payerId]: rule.amount}, 
+                  payers: rule.payers || {[rule.payerId]: rule.amount},
+                  splitDetails: rule.splitDetails || {[rule.payerId]: rule.amount}, 
                   date: Timestamp.fromDate(new Date()),
                   currency: 'TWD',
                   isRecurring: true

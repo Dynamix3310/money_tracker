@@ -87,6 +87,8 @@ export interface RecurringRule {
   nextDate: any;
   frequency: 'monthly';
   active: boolean;
+  payers?: Record<string, number>;
+  splitDetails?: Record<string, number>;
 }
 
 export interface NetWorthHistory {
