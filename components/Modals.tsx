@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator } from 'lucide-react';
+import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2 } from 'lucide-react';
 import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog, Transaction, ChatMessage, BankAccount } from '../types';
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc } from 'firebase/firestore';
 import { db, getCollectionPath, auth } from '../services/firebase';
@@ -238,7 +238,7 @@ export const SettingsModal = ({ onClose, onExport, onImport, currentGroupId, cat
   );
 }
 
-// --- Transactions (Updated for Advanced Split) ---
+// --- Transactions (Updated for Advanced Split & Auto Calc) ---
 export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData }: any) => {
    const [type, setType] = useState<'expense'|'income'>(editData?.type || 'expense');
    const [amount, setAmount] = useState(editData?.totalAmount?.toString() || '');
@@ -287,11 +287,56 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
    // Calculations for validation
    const totalAmountVal = parseFloat(amount) || 0;
    
-   const payerSum = payerMode === 'single' ? totalAmountVal : Object.values(multiPayers).reduce((acc, val) => acc + (parseFloat(val as string)||0), 0);
-   const splitSum = splitMode === 'equal' ? totalAmountVal : Object.values(customSplits).reduce((acc, val) => acc + (parseFloat(val as string)||0), 0);
+   const payerSum = payerMode === 'single' ? totalAmountVal : Object.values(multiPayers).reduce((acc: number, val) => acc + (parseFloat(val as string)||0), 0);
+   const splitSum = splitMode === 'equal' ? totalAmountVal : Object.values(customSplits).reduce((acc: number, val) => acc + (parseFloat(val as string)||0), 0);
    
    const isValidPayer = Math.abs(payerSum - totalAmountVal) < 1;
    const isValidSplit = Math.abs(splitSum - totalAmountVal) < 1;
+
+   // --- Auto Calculation Handlers ---
+
+   const fillRemainder = (id: string, currentMap: Record<string, string>, setMap: Function) => {
+       if (totalAmountVal <= 0) return;
+       const otherSum = Object.entries(currentMap)
+           .filter(([k, v]) => k !== id)
+           .reduce((acc: number, [k, v]) => acc + (parseFloat(v) || 0), 0);
+       const remainder = Math.max(0, totalAmountVal - otherSum);
+       // If simple integer, no decimal. If float, fix to 1 decimal place
+       const valStr = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(1);
+       setMap({ ...currentMap, [id]: valStr });
+   };
+
+   const handlePayerChange = (id: string, val: string) => {
+       const newVal = val;
+       const numVal = parseFloat(val) || 0;
+       const newMap = { ...multiPayers, [id]: newVal };
+
+       // Auto-balance logic for exactly 2 people
+       if (people.length === 2 && totalAmountVal > 0) {
+           const other = people.find((p: any) => p.id !== id);
+           if (other) {
+               const remainder = Math.max(0, totalAmountVal - numVal);
+               newMap[other.id] = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(1);
+           }
+       }
+       setMultiPayers(newMap);
+   };
+
+   const handleSplitChange = (id: string, val: string) => {
+       const newVal = val;
+       const numVal = parseFloat(val) || 0;
+       const newMap = { ...customSplits, [id]: newVal };
+
+       // Auto-balance logic for exactly 2 people
+       if (people.length === 2 && totalAmountVal > 0) {
+           const other = people.find((p: any) => p.id !== id);
+           if (other) {
+               const remainder = Math.max(0, totalAmountVal - numVal);
+               newMap[other.id] = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(1);
+           }
+       }
+       setCustomSplits(newMap);
+   };
 
    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]; if (!file) return; setLoadingAI(true);
@@ -405,8 +450,17 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                                           placeholder="0" 
                                           className="flex-1 p-2 rounded border text-sm" 
                                           value={multiPayers[p.id] || ''} 
-                                          onChange={e=>{setMultiPayers({...multiPayers, [p.id]: e.target.value})}}
+                                          onChange={e=>handlePayerChange(p.id, e.target.value)}
                                        />
+                                       {people.length > 2 && (
+                                            <button 
+                                                onClick={() => fillRemainder(p.id, multiPayers, setMultiPayers)}
+                                                className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"
+                                                title="填入剩餘金額"
+                                            >
+                                                <Wand2 size={14} />
+                                            </button>
+                                       )}
                                    </div>
                                ))}
                                <div className={`text-xs text-right font-bold ${isValidPayer?'text-emerald-500':'text-red-500'}`}>
@@ -442,8 +496,17 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                                           placeholder="0" 
                                           className="flex-1 p-2 rounded border text-sm" 
                                           value={customSplits[p.id] || ''} 
-                                          onChange={e=>{setCustomSplits({...customSplits, [p.id]: e.target.value})}}
+                                          onChange={e=>handleSplitChange(p.id, e.target.value)}
                                        />
+                                       {people.length > 2 && (
+                                            <button 
+                                                onClick={() => fillRemainder(p.id, customSplits, setCustomSplits)}
+                                                className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"
+                                                title="填入剩餘金額"
+                                            >
+                                                <Wand2 size={14} />
+                                            </button>
+                                       )}
                                    </div>
                                ))}
                                <div className={`text-xs text-right font-bold ${isValidSplit?'text-emerald-500':'text-red-500'}`}>
@@ -521,19 +584,19 @@ export const AddPlatformModal = ({ userId, onClose, editData }: any) => {
 export const ManagePlatformCashModal = ({ platform, userId, onClose }: any) => {
    const [amount, setAmount] = useState('');
    const [type, setType] = useState<'deposit'|'withdraw'>('deposit');
-   const handleSave = async () => { const val = parseFloat(amount); if(!val) return; const newBal = type === 'deposit' ? platform.balance + val : platform.balance - val; await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platform.id), { balance: newBal }); onClose(); }
+   const handleSave = async () => { const val = parseFloat(amount); if(!val) return; const newBal = type === 'deposit' ? (platform.balance as number) + val : (platform.balance as number) - val; await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platform.id), { balance: newBal }); onClose(); }
    return ( <div className={styles.overlay}><div className={styles.content}> <h3 className="font-bold text-xl mb-4">管理 {platform.name} 現金</h3> <div className="bg-slate-50 p-3 rounded-xl mb-4 text-center"> <div className="text-xs text-slate-400">目前餘額</div> <div className="text-2xl font-bold text-slate-800">{platform.balance.toLocaleString()} {platform.currency}</div> </div> <div className="space-y-4"> <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={()=>setType('deposit')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='deposit'?'bg-white shadow text-emerald-600':'text-slate-400'}`}>入金 (Deposit)</button><button onClick={()=>setType('withdraw')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='withdraw'?'bg-white shadow text-red-600':'text-slate-400'}`}>出金 (Withdraw)</button></div> <div><label className={styles.label}>金額</label><input type="number" className={styles.input} value={amount} onChange={e=>setAmount(e.target.value)} /></div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認</button></div> </div> </div></div> )
 }
 
 export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
-   const [symbol, setSymbol] = useState(''); const [qty, setQty] = useState(''); const [cost, setCost] = useState(''); const [platformId, setPlatformId] = useState(platforms[0]?.id || ''); const [type, setType] = useState<'stock'|'crypto'>('stock'); const [deductCash, setDeductCash] = useState(true);
-   const handleSave = async () => { if(!symbol || !qty || !cost || !platformId) return; const totalCost = parseFloat(cost) * parseFloat(qty); const platform = platforms.find((p:any) => p.id === platformId); await addDoc(collection(db, getCollectionPath(userId, null, 'holdings')), { symbol: symbol.toUpperCase(), quantity: parseFloat(qty), avgCost: parseFloat(cost), currentPrice: parseFloat(cost), currency: platform?.currency || 'USD', type, platformId }); if(deductCash && platform) { await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platformId), { balance: platform.balance - totalCost }); } onClose(); };
+   const [symbol, setSymbol] = useState(''); const [qty, setQty] = useState<string>(''); const [cost, setCost] = useState<string>(''); const [platformId, setPlatformId] = useState(platforms[0]?.id || ''); const [type, setType] = useState<'stock'|'crypto'>('stock'); const [deductCash, setDeductCash] = useState(true);
+   const handleSave = async () => { if(!symbol || !qty || !cost || !platformId) return; const totalCost = parseFloat(cost as string) * parseFloat(qty as string); const platform = platforms.find((p:any) => p.id === platformId); await addDoc(collection(db, getCollectionPath(userId, null, 'holdings')), { symbol: symbol.toUpperCase(), quantity: parseFloat(qty as string), avgCost: parseFloat(cost as string), currentPrice: parseFloat(cost as string), currency: platform?.currency || 'USD', type, platformId }); if(deductCash && platform) { await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platformId), { balance: platform.balance - totalCost }); } onClose(); };
    return ( <div className={styles.overlay}><div className={styles.content}> <h3 className="font-bold text-xl mb-4">新增資產</h3> <div className="space-y-4"> <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={()=>setType('stock')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='stock'?'bg-white shadow text-blue-600':'text-slate-400'}`}>股票</button><button onClick={()=>setType('crypto')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='crypto'?'bg-white shadow text-orange-600':'text-slate-400'}`}>加密貨幣</button></div> <div> <label className={styles.label}>選擇平台</label> <select className={styles.input} value={platformId} onChange={e=>setPlatformId(e.target.value)}> {platforms.map((p:any) => <option key={p.id} value={p.id}>{p.name} ({p.currency})</option>)} </select> </div> {platformId && <div className="flex items-center gap-2 px-2"> <input type="checkbox" checked={deductCash} onChange={e=>setDeductCash(e.target.checked)} id="dc" className="w-4 h-4 text-indigo-600 rounded"/> <label htmlFor="dc" className="text-xs text-slate-600 font-bold">從平台現金扣款 (總額: {(parseFloat(cost||'0')*parseFloat(qty||'0')).toFixed(2)})</label> </div>} <div className="grid grid-cols-2 gap-3"> <div><label className={styles.label}>代號</label><input placeholder="AAPL" className={styles.input} value={symbol} onChange={e=>setSymbol(e.target.value)} /></div> <div><label className={styles.label}>數量</label><input type="number" className={styles.input} value={qty} onChange={e=>setQty(e.target.value)} /></div> </div> <div><label className={styles.label}>平均單價 (Cost)</label><input type="number" className={styles.input} value={cost} onChange={e=>setCost(e.target.value)} /></div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div> </div> </div></div> )
 }
 
 export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
-   const [qty, setQty] = useState(holding.quantity.toString()); const [price, setPrice] = useState(holding.currentPrice.toString()); const [cost, setCost] = useState(holding.avgCost.toString());
-   const handleSave = async () => { await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), { quantity: parseFloat(qty), currentPrice: parseFloat(price), avgCost: parseFloat(cost) }); onClose(); };
+   const [qty, setQty] = useState<string>(holding.quantity.toString()); const [price, setPrice] = useState<string>(holding.currentPrice.toString()); const [cost, setCost] = useState<string>(holding.avgCost.toString());
+   const handleSave = async () => { await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), { quantity: parseFloat(qty as string), currentPrice: parseFloat(price as string), avgCost: parseFloat(cost as string) }); onClose(); };
    return ( <div className={styles.overlay}><div className={styles.content}> <div className="flex justify-between mb-4"><h3 className="font-bold text-xl">編輯資產: {holding.symbol}</h3><button onClick={()=>onDelete(holding)} className="text-red-500 p-1 bg-red-50 rounded"><Trash2 size={18}/></button></div> <div className="space-y-4"> <div><label className={styles.label}>目前市價 (手動更新)</label><input type="number" className={styles.input} value={price} onChange={e=>setPrice(e.target.value)} /></div> <div className="grid grid-cols-2 gap-3"> <div><label className={styles.label}>持有數量</label><input type="number" className={styles.input} value={qty} onChange={e=>setQty(e.target.value)} /></div> <div><label className={styles.label}>平均成本</label><input type="number" className={styles.input} value={cost} onChange={e=>setCost(e.target.value)} /></div> </div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存變更</button></div> </div> </div></div> )
 }
 
@@ -564,8 +627,8 @@ export const AddCardModal = ({userId, onClose, editData}:any) => {
    return <div className={styles.overlay}><div className={styles.content}><h3 className="font-bold text-xl mb-4">{editData ? '編輯信用卡' : '新增信用卡'}</h3><div className="space-y-4"><div><label className={styles.label}>卡片名稱</label><input className={styles.input} value={name} onChange={e=>setName(e.target.value)}/></div><div><label className={styles.label}>結帳日 (1-31)</label><input type="number" className={styles.input} value={day} onChange={e=>setDay(e.target.value)}/></div><div className="flex gap-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={styles.btnPrimary+" flex-1"}>儲存</button></div></div></div></div>
 }
 export const SellAssetModal = ({ holding, onClose, onConfirm }: any) => {
-  const [p, setP] = useState(holding.currentPrice.toString()); const [q, setQ] = useState(holding.quantity.toString());
-  return <div className={styles.overlay}><div className={styles.content}><h3 className="font-bold text-xl mb-4">賣出資產: {holding.symbol}</h3><div className="space-y-4"><div><label className={styles.label}>賣出單價 ({holding.currency})</label><input className={styles.input} type="number" value={p} onChange={e=>setP(e.target.value)} /></div><div><label className={styles.label}>賣出數量 (最大: {holding.quantity})</label><input className={styles.input} type="number" value={q} onChange={e=>setQ(e.target.value)} /></div><div className="text-xs text-slate-500 bg-slate-100 p-2 rounded">賣出後金額將存回平台現金餘額。</div><div className="flex gap-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={()=>onConfirm(parseFloat(p),parseFloat(q))} className={styles.btnPrimary+" flex-1"}>確認賣出</button></div></div></div></div>
+  const [p, setP] = useState<string>(holding.currentPrice.toString()); const [q, setQ] = useState<string>(holding.quantity.toString());
+  return <div className={styles.overlay}><div className={styles.content}><h3 className="font-bold text-xl mb-4">賣出資產: {holding.symbol}</h3><div className="space-y-4"><div><label className={styles.label}>賣出單價 ({holding.currency})</label><input className={styles.input} type="number" value={p} onChange={e=>setP(e.target.value)} /></div><div><label className={styles.label}>賣出數量 (最大: {holding.quantity})</label><input className={styles.input} type="number" value={q} onChange={e=>setQ(e.target.value)} /></div><div className="text-xs text-slate-500 bg-slate-100 p-2 rounded">賣出後金額將存回平台現金餘額。</div><div className="flex gap-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={()=>onConfirm(parseFloat(p as string),parseFloat(q as string))} className={styles.btnPrimary+" flex-1"}>確認賣出</button></div></div></div></div>
 }
 
 export const AIAssistantModal = ({ onClose, contextData }: any) => {
