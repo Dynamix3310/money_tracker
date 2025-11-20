@@ -49,6 +49,11 @@ export const LedgerView = ({ transactions, people, onAdd, onBatchAdd, currentGro
    
    const linkedIds = useMemo(() => new Set(cardLogs.filter((c:any) => c.isReconciled && c.linkedTransactionId).map((c:any) => c.linkedTransactionId)), [cardLogs]);
 
+   // Identify current user's person ID for split calculation
+   const myPersonId = useMemo(() => {
+       return people.find((p: any) => p.uid === userId || p.isMe)?.id;
+   }, [people, userId]);
+
    const getDateRange = () => {
       const now = new Date();
       const start = new Date(now);
@@ -176,22 +181,34 @@ export const LedgerView = ({ transactions, people, onAdd, onBatchAdd, currentGro
                    <div key={month}>
                        <div className="text-xs font-bold text-slate-400 mb-2 ml-1">{month}</div>
                        <div className="space-y-2">
-                           {(list as any[]).map((t: any) => (
-                               <div key={t.id} className="bg-white px-4 py-3 rounded-xl border border-slate-100 flex justify-between items-center group">
-                                  <div className="flex gap-3 items-center">
-                                     <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${t.type==='income'?'bg-emerald-500':'bg-blue-500'} relative`}>
-                                         {t.category?.[0]}
-                                         {linkedIds.has(t.id) && <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 border shadow-sm"><Link2 size={10} className="text-indigo-600"/></div>}
-                                     </div>
-                                     <div><div className="font-bold text-slate-800 text-sm">{t.description}</div><div className="text-[10px] text-slate-400">{t.date?.seconds?new Date(t.date.seconds*1000).toLocaleDateString():''} • {t.category} {t.isRecurring && '(自動)'}</div></div>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                     <div className={`font-bold font-mono ${t.type==='income'?'text-emerald-600':'text-slate-800'}`}>{t.type==='income'?'+':''}{t.totalAmount} $</div>
-                                     <button onClick={()=>onEdit(t)} className="text-slate-300 hover:text-indigo-500 p-1.5"><Edit size={14}/></button>
-                                     <button onClick={()=>onDelete(t.id)} className="text-slate-300 hover:text-red-500 p-1.5"><Trash2 size={14}/></button>
-                                  </div>
-                               </div>
-                           ))}
+                           {(list as any[]).map((t: any) => {
+                               const myShare = myPersonId && t.type === 'expense' ? t.splitDetails?.[myPersonId] : 0;
+                               return (
+                                   <div key={t.id} className="bg-white px-4 py-3 rounded-xl border border-slate-100 flex justify-between items-center group">
+                                      <div className="flex gap-3 items-center">
+                                         <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${t.type==='income'?'bg-emerald-500':'bg-blue-500'} relative`}>
+                                             {t.category?.[0]}
+                                             {linkedIds.has(t.id) && <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 border shadow-sm"><Link2 size={10} className="text-indigo-600"/></div>}
+                                         </div>
+                                         <div><div className="font-bold text-slate-800 text-sm">{t.description}</div><div className="text-[10px] text-slate-400">{t.date?.seconds?new Date(t.date.seconds*1000).toLocaleDateString():''} • {t.category} {t.isRecurring && '(自動)'}</div></div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                         <div className="text-right">
+                                             <div className={`font-bold font-mono ${t.type==='income'?'text-emerald-600':'text-slate-800'}`}>{t.type==='income'?'+':''}{t.totalAmount} $</div>
+                                             {myShare > 0 && (
+                                                 <div className="text-[10px] text-slate-500 font-medium">
+                                                     (自付 {Math.round(myShare)})
+                                                 </div>
+                                             )}
+                                         </div>
+                                         <div className="flex flex-col gap-1">
+                                            <button onClick={()=>onEdit(t)} className="text-slate-300 hover:text-indigo-500 p-1"><Edit size={14}/></button>
+                                            <button onClick={()=>onDelete(t.id)} className="text-slate-300 hover:text-red-500 p-1"><Trash2 size={14}/></button>
+                                         </div>
+                                      </div>
+                                   </div>
+                               );
+                           })}
                        </div>
                    </div>
                 ))}

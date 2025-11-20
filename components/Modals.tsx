@@ -285,7 +285,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
    useEffect(() => { if(currentCats.length > 0 && !category) setCategory(currentCats[0].name); }, [type, categories]);
 
    // Calculations for validation
-   const totalAmountVal = parseFloat(amount) || 0;
+   const totalAmountVal = parseFloat(String(amount)) || 0;
    
    const payerSum = payerMode === 'single' ? totalAmountVal : Object.values(multiPayers).reduce((acc: number, val) => acc + (parseFloat(val as string)||0), 0);
    const splitSum = splitMode === 'equal' ? totalAmountVal : Object.values(customSplits).reduce((acc: number, val) => acc + (parseFloat(val as string)||0), 0);
@@ -300,7 +300,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
        const otherSum = Object.entries(currentMap)
            .filter(([k, v]) => k !== id)
            .reduce((acc: number, [k, v]) => acc + (parseFloat(v) || 0), 0);
-       const remainder = Math.max(0, totalAmountVal - otherSum);
+       const remainder = Math.max(0, Number(totalAmountVal) - otherSum);
        // If simple integer, no decimal. If float, fix to 1 decimal place
        const valStr = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(1);
        setMap({ ...currentMap, [id]: valStr });
@@ -308,14 +308,14 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
 
    const handlePayerChange = (id: string, val: string) => {
        const newVal = val;
-       const numVal = parseFloat(val) || 0;
+       const numVal = parseFloat(val as string) || 0;
        const newMap = { ...multiPayers, [id]: newVal };
 
        // Auto-balance logic for exactly 2 people
        if (people.length === 2 && totalAmountVal > 0) {
            const other = people.find((p: any) => p.id !== id);
            if (other) {
-               const remainder = Math.max(0, totalAmountVal - numVal);
+               const remainder = Math.max(0, Number(totalAmountVal) - Number(numVal));
                newMap[other.id] = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(1);
            }
        }
@@ -324,14 +324,14 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
 
    const handleSplitChange = (id: string, val: string) => {
        const newVal = val;
-       const numVal = parseFloat(val) || 0;
+       const numVal = parseFloat(val as string) || 0;
        const newMap = { ...customSplits, [id]: newVal };
 
        // Auto-balance logic for exactly 2 people
        if (people.length === 2 && totalAmountVal > 0) {
            const other = people.find((p: any) => p.id !== id);
            if (other) {
-               const remainder = Math.max(0, totalAmountVal - numVal);
+               const remainder = Math.max(0, Number(totalAmountVal) - Number(numVal));
                newMap[other.id] = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(1);
            }
        }
@@ -584,7 +584,7 @@ export const AddPlatformModal = ({ userId, onClose, editData }: any) => {
 export const ManagePlatformCashModal = ({ platform, userId, onClose }: any) => {
    const [amount, setAmount] = useState('');
    const [type, setType] = useState<'deposit'|'withdraw'>('deposit');
-   const handleSave = async () => { const val = parseFloat(amount); if(!val) return; const newBal = type === 'deposit' ? (platform.balance as number) + val : (platform.balance as number) - val; await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platform.id), { balance: newBal }); onClose(); }
+   const handleSave = async () => { const val = parseFloat(String(amount)); if(!val) return; const newBal = type === 'deposit' ? (platform.balance as number) + val : (platform.balance as number) - val; await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platform.id), { balance: newBal }); onClose(); }
    return ( <div className={styles.overlay}><div className={styles.content}> <h3 className="font-bold text-xl mb-4">管理 {platform.name} 現金</h3> <div className="bg-slate-50 p-3 rounded-xl mb-4 text-center"> <div className="text-xs text-slate-400">目前餘額</div> <div className="text-2xl font-bold text-slate-800">{platform.balance.toLocaleString()} {platform.currency}</div> </div> <div className="space-y-4"> <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={()=>setType('deposit')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='deposit'?'bg-white shadow text-emerald-600':'text-slate-400'}`}>入金 (Deposit)</button><button onClick={()=>setType('withdraw')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='withdraw'?'bg-white shadow text-red-600':'text-slate-400'}`}>出金 (Withdraw)</button></div> <div><label className={styles.label}>金額</label><input type="number" className={styles.input} value={amount} onChange={e=>setAmount(e.target.value)} /></div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認</button></div> </div> </div></div> )
 }
 
@@ -628,7 +628,7 @@ export const AddCardModal = ({userId, onClose, editData}:any) => {
 }
 export const SellAssetModal = ({ holding, onClose, onConfirm }: any) => {
   const [p, setP] = useState<string>(holding.currentPrice.toString()); const [q, setQ] = useState<string>(holding.quantity.toString());
-  return <div className={styles.overlay}><div className={styles.content}><h3 className="font-bold text-xl mb-4">賣出資產: {holding.symbol}</h3><div className="space-y-4"><div><label className={styles.label}>賣出單價 ({holding.currency})</label><input className={styles.input} type="number" value={p} onChange={e=>setP(e.target.value)} /></div><div><label className={styles.label}>賣出數量 (最大: {holding.quantity})</label><input className={styles.input} type="number" value={q} onChange={e=>setQ(e.target.value)} /></div><div className="text-xs text-slate-500 bg-slate-100 p-2 rounded">賣出後金額將存回平台現金餘額。</div><div className="flex gap-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={()=>onConfirm(parseFloat(p as string),parseFloat(q as string))} className={styles.btnPrimary+" flex-1"}>確認賣出</button></div></div></div></div>
+  return <div className={styles.overlay}><div className={styles.content}><h3 className="font-bold text-xl mb-4">賣出資產: {holding.symbol}</h3><div className="space-y-4"><div><label className={styles.label}>賣出單價 ({holding.currency})</label><input className={styles.input} type="number" value={p} onChange={e=>setP(e.target.value)} /></div><div><label className={styles.label}>賣出數量 (最大: {holding.quantity})</label><input className={styles.input} type="number" value={q} onChange={e=>setQ(e.target.value)} /></div><div className="text-xs text-slate-500 bg-slate-100 p-2 rounded">賣出後金額將存回平台現金餘額。</div><div className="flex gap-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={()=>onConfirm(parseFloat(String(p)),parseFloat(String(q)))} className={styles.btnPrimary+" flex-1"}>確認賣出</button></div></div></div></div>
 }
 
 export const AIAssistantModal = ({ onClose, contextData }: any) => {
