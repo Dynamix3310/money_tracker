@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal } from 'lucide-react';
 import { AssetHolding, Transaction, BankAccount, CreditCardInfo, Person, BankTransaction, CreditCardLog, Platform } from '../types';
@@ -259,7 +258,7 @@ export const LedgerView = ({ transactions, categories, people, onAdd, onBatchAdd
             <div className="space-y-4">
                <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mb-4">
                    <h4 className="font-bold text-indigo-900 mb-1">本月預算追蹤</h4>
-                   <p className="text-xs text-indigo-600">設定分類預算可協助您控制花費。請至「設定 > 分類」新增或修改預算。</p>
+                   <p className="text-xs text-indigo-600">設定分類預算可協助您控制花費。請至「設定 &gt; 分類」新增或修改預算。</p>
                </div>
                {budgetData.length === 0 ? (
                    <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 text-sm">
