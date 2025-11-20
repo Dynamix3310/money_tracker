@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard } from 'lucide-react';
+import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal } from 'lucide-react';
 import { AssetHolding, Transaction, BankAccount, CreditCardInfo, Person, BankTransaction, CreditCardLog, Platform } from '../types';
 import { ExpensePieChart } from './Charts';
 
@@ -39,17 +39,16 @@ export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlat
    );
 };
 
-// --- Ledger View (Updated with Debt Calculation) ---
-export const LedgerView = ({ transactions, people, onAdd, onBatchAdd, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring }: any) => {
-   const [viewMode, setViewMode] = useState<'list' | 'stats' | 'debts'>('list'); // Added 'debts'
+// --- Ledger View ---
+export const LedgerView = ({ transactions, categories, people, onAdd, onBatchAdd, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring }: any) => {
+   const [viewMode, setViewMode] = useState<'list' | 'stats' | 'debts' | 'budget'>('list'); 
    const [searchTerm, setSearchTerm] = useState('');
    const [timeRange, setTimeRange] = useState<'week' | 'month' | 'lastMonth' | 'year' | 'custom'>('month');
-   const [customStart, setCustomStart] = useState('');
-   const [customEnd, setCustomEnd] = useState('');
+   const [customStart, setCustomStart] = useState(new Date().toISOString().split('T')[0]);
+   const [customEnd, setCustomEnd] = useState(new Date().toISOString().split('T')[0]);
    
    const linkedIds = useMemo(() => new Set(cardLogs.filter((c:any) => c.isReconciled && c.linkedTransactionId).map((c:any) => c.linkedTransactionId)), [cardLogs]);
 
-   // Identify current user's person ID for split calculation
    const myPersonId = useMemo(() => {
        return people.find((p: any) => p.uid === userId || p.isMe)?.id;
    }, [people, userId]);
@@ -83,15 +82,18 @@ export const LedgerView = ({ transactions, people, onAdd, onBatchAdd, currentGro
 
    const { start: filterStart, end: filterEnd } = getDateRange();
 
-   // Filter logic
    const filtered = transactions.filter((t: any) => {
        const matchSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase()) || t.category.includes(searchTerm);
        const d = t.date?.seconds ? new Date(t.date.seconds*1000) : new Date(0);
-       if (viewMode === 'stats') return d >= filterStart && d <= filterEnd;
+       
+       // Apply date filter to Stats, but also List if not searching (optional, but good for consistency)
+       // Currently applying date filter only to Stats as per user request for "Pie Chart"
+       if (viewMode === 'stats') {
+           return d >= filterStart && d <= filterEnd;
+       }
        return matchSearch;
    }).sort((a:any,b:any) => (b.date?.seconds||0) - (a.date?.seconds||0));
 
-   // Group by Month
    const groupedTransactions = useMemo(() => {
        const groups: Record<string, any[]> = {};
        filtered.forEach((t:any) => {
@@ -103,31 +105,32 @@ export const LedgerView = ({ transactions, people, onAdd, onBatchAdd, currentGro
        return groups;
    }, [filtered, viewMode]);
 
-   // Debt Calculation (All Time, not filtered by date usually)
    const debtData = useMemo(() => {
        const balances: Record<string, number> = {};
        people.forEach((p:any) => balances[p.id] = 0);
-
        transactions.forEach((t:any) => {
            if(t.type === 'expense') {
-               // Who paid (Credit)
-               Object.entries(t.payers).forEach(([pid, amount]:any) => {
-                   balances[pid] = (balances[pid] || 0) + amount;
-               });
-               // Who consumed (Debit)
-               Object.entries(t.splitDetails).forEach(([pid, amount]:any) => {
-                   balances[pid] = (balances[pid] || 0) - amount;
-               });
+               Object.entries(t.payers).forEach(([pid, amount]:any) => { balances[pid] = (balances[pid] || 0) + amount; });
+               Object.entries(t.splitDetails).forEach(([pid, amount]:any) => { balances[pid] = (balances[pid] || 0) - amount; });
            }
        });
-
-       return Object.entries(balances)
-           .map(([id, amount]) => ({ 
-               person: people.find((p:any)=>p.id===id), 
-               amount 
-           }))
-           .sort((a,b) => b.amount - a.amount); // Highest creditor first
+       return Object.entries(balances).map(([id, amount]) => ({ person: people.find((p:any)=>p.id===id), amount })).sort((a,b) => b.amount - a.amount);
    }, [transactions, people]);
+
+   const budgetData = useMemo(() => {
+       const now = new Date();
+       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+       const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+       const monthlyExpenses: Record<string, number> = {};
+       transactions.forEach((t:any) => {
+           if(t.type !== 'expense') return;
+           const d = t.date?.seconds ? new Date(t.date.seconds*1000) : new Date(0);
+           if(d >= startOfMonth && d <= endOfMonth) {
+               monthlyExpenses[t.category] = (monthlyExpenses[t.category] || 0) + t.totalAmount;
+           }
+       });
+       return categories.filter((c:any) => c.type === 'expense' && c.budgetLimit && c.budgetLimit > 0).map((c:any) => ({ ...c, spent: monthlyExpenses[c.name] || 0 })).sort((a:any,b:any) => (b.spent / b.budgetLimit) - (a.spent / a.budgetLimit));
+   }, [transactions, categories]);
 
    const statsData = useMemo(() => {
        const catMap: any = {}, memberMap: any = {};
@@ -159,6 +162,7 @@ export const LedgerView = ({ transactions, people, onAdd, onBatchAdd, currentGro
                    <div className="flex bg-slate-100 p-1 rounded-lg">
                        <button onClick={()=>setViewMode('list')} className={`p-1.5 rounded ${viewMode==='list'?'bg-white shadow text-slate-800':'text-slate-400'}`}><Calendar size={14}/></button>
                        <button onClick={()=>setViewMode('debts')} className={`p-1.5 rounded ${viewMode==='debts'?'bg-white shadow text-slate-800':'text-slate-400'}`}><Receipt size={14}/></button>
+                       <button onClick={()=>setViewMode('budget')} className={`p-1.5 rounded ${viewMode==='budget'?'bg-white shadow text-slate-800':'text-slate-400'}`}><Goal size={14}/></button>
                        <button onClick={()=>setViewMode('stats')} className={`p-1.5 rounded ${viewMode==='stats'?'bg-white shadow text-slate-800':'text-slate-400'}`}><PieChart size={14}/></button>
                    </div>
                    <button onClick={onAdd} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><Plus size={14}/> 記一筆</button>
@@ -166,12 +170,21 @@ export const LedgerView = ({ transactions, people, onAdd, onBatchAdd, currentGro
             </div>
             {viewMode==='list' && <div className="relative"><Search size={16} className="absolute left-3 top-2.5 text-slate-400"/><input placeholder="搜尋..." className="w-full bg-slate-50 border rounded-xl pl-10 pr-4 py-2 text-sm outline-none" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)}/></div>}
             {viewMode==='stats' && (
-               <div className="flex flex-wrap gap-2 pt-1">
-                  {['week', 'month', 'lastMonth', 'year'].map((r:any) => (
-                     <button key={r} onClick={()=>setTimeRange(r)} className={`px-3 py-1 rounded-full text-xs font-bold border ${timeRange===r?'bg-indigo-600 text-white border-indigo-600':'bg-white text-slate-500 border-slate-200'}`}>
-                        {r==='week'?'本週':r==='month'?'本月':r==='lastMonth'?'上個月':'今年'}
-                     </button>
-                  ))}
+               <div className="flex flex-col gap-2 pt-1">
+                  <div className="flex flex-wrap gap-2">
+                      {['week', 'month', 'lastMonth', 'year', 'custom'].map((r:any) => (
+                         <button key={r} onClick={()=>setTimeRange(r)} className={`px-3 py-1 rounded-full text-xs font-bold border ${timeRange===r?'bg-indigo-600 text-white border-indigo-600':'bg-white text-slate-500 border-slate-200'}`}>
+                            {r==='week'?'本週':r==='month'?'本月':r==='lastMonth'?'上月':r==='year'?'今年':r==='custom'?'自訂':''}
+                         </button>
+                      ))}
+                  </div>
+                  {timeRange === 'custom' && (
+                      <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                          <input type="date" className="flex-1 bg-white border rounded px-2 py-1.5 text-xs outline-none focus:border-indigo-400" value={customStart} onChange={e=>setCustomStart(e.target.value)}/>
+                          <span className="text-slate-400 text-xs">至</span>
+                          <input type="date" className="flex-1 bg-white border rounded px-2 py-1.5 text-xs outline-none focus:border-indigo-400" value={customEnd} onChange={e=>setCustomEnd(e.target.value)}/>
+                      </div>
+                  )}
                </div>
             )}
          </div>
@@ -219,6 +232,73 @@ export const LedgerView = ({ transactions, people, onAdd, onBatchAdd, currentGro
              </div>
          )}
 
+         {viewMode === 'stats' && (
+             <div className="space-y-6">
+                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64">
+                     <h3 className="font-bold text-slate-700 text-sm mb-2">收支比例</h3>
+                     <ExpensePieChart data={statsData.catChart}/>
+                 </div>
+                 <div className="flex gap-3">
+                     <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-100">
+                         <div className="text-xs text-slate-400">總支出</div>
+                         <div className="text-xl font-bold text-red-500">${statsData.totalExp.toLocaleString()}</div>
+                     </div>
+                     <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-100">
+                         <div className="text-xs text-slate-400">總收入</div>
+                         <div className="text-xl font-bold text-emerald-600">${statsData.totalInc.toLocaleString()}</div>
+                     </div>
+                 </div>
+                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64">
+                     <h3 className="font-bold text-slate-700 text-sm mb-2">成員付款統計</h3>
+                     <ExpensePieChart data={statsData.memChart}/>
+                 </div>
+             </div>
+         )}
+
+         {viewMode === 'budget' && (
+            <div className="space-y-4">
+               <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mb-4">
+                   <h4 className="font-bold text-indigo-900 mb-1">本月預算追蹤</h4>
+                   <p className="text-xs text-indigo-600">設定分類預算可協助您控制花費。請至「設定 > 分類」新增或修改預算。</p>
+               </div>
+               {budgetData.length === 0 ? (
+                   <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 text-sm">
+                       尚未設定任何預算<br/>
+                       <span className="text-xs mt-2 block">請至設定頁面為分類添加預算金額</span>
+                   </div>
+               ) : (
+                   budgetData.map((item: any) => {
+                       const percent = Math.min((item.spent / item.budgetLimit) * 100, 100);
+                       const isOver = item.spent > item.budgetLimit;
+                       const isWarning = !isOver && percent > 80;
+                       let barColor = 'bg-emerald-500';
+                       if(isOver) barColor = 'bg-red-500';
+                       else if(isWarning) barColor = 'bg-amber-500';
+                       return (
+                           <div key={item.id} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                               <div className="flex justify-between items-end mb-2">
+                                   <div className="font-bold text-slate-800">{item.name}</div>
+                                   <div className="text-xs font-bold">
+                                       <span className={isOver ? 'text-red-500' : 'text-slate-700'}>${item.spent.toLocaleString()}</span>
+                                       <span className="text-slate-400 mx-1">/</span>
+                                       <span className="text-slate-500">${item.budgetLimit.toLocaleString()}</span>
+                                   </div>
+                               </div>
+                               <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                   <div className={`h-full ${barColor} transition-all duration-500`} style={{width: `${percent}%`}}/>
+                               </div>
+                               <div className="flex justify-between mt-1.5">
+                                   <div className="text-[10px] text-slate-400">{Math.round(percent)}% 已使用</div>
+                                   {isOver && <div className="text-[10px] font-bold text-red-500">超支 ${Math.round(item.spent - item.budgetLimit).toLocaleString()}</div>}
+                                   {!isOver && <div className="text-[10px] font-bold text-emerald-600">剩餘 ${Math.round(item.budgetLimit - item.spent).toLocaleString()}</div>}
+                               </div>
+                           </div>
+                       );
+                   })
+               )}
+            </div>
+         )}
+
          {viewMode === 'debts' && (
             <div className="space-y-4">
                 <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 text-center">
@@ -249,7 +329,6 @@ export const LedgerView = ({ transactions, people, onAdd, onBatchAdd, currentGro
 export const CashView = ({ accounts, creditCards, onTransfer, onAddAccount, onManageAccount, onAddCard, onManageCard, onViewAccount, onViewCard }: any) => {
    return (
       <div className="space-y-6 animate-in slide-in-from-bottom-4 pb-20">
-         {/* Accounts Section */}
          <div>
             <div className="flex justify-between items-center mb-3">
                <h3 className="font-bold text-lg text-slate-800">銀行帳戶</h3>
@@ -273,7 +352,6 @@ export const CashView = ({ accounts, creditCards, onTransfer, onAddAccount, onMa
             </div>
          </div>
 
-         {/* Credit Cards Section */}
          <div>
             <div className="flex justify-between items-center mb-3">
                <h3 className="font-bold text-lg text-slate-800">信用卡</h3>

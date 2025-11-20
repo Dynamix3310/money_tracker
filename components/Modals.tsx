@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon, FileSpreadsheet, AlertTriangle, CheckSquare, Square } from 'lucide-react';
 import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog, Transaction, ChatMessage, BankAccount } from '../types';
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc } from 'firebase/firestore';
 import { db, getCollectionPath, auth } from '../services/firebase';
@@ -126,17 +126,16 @@ export const AddRecurringModal = ({ userId, groupId, people, categories, onClose
    )
 }
 
-// --- Settings (Updated) ---
-export const SettingsModal = ({ onClose, onExport, onImport, currentGroupId, categories, onAddCategory, onDeleteCategory, onGroupJoin }: any) => {
+// --- Settings ---
+export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, currentGroupId, categories, onAddCategory, onDeleteCategory, onGroupJoin }: any) => {
   const [activeTab, setActiveTab] = useState('general');
   const [newCat, setNewCat] = useState('');
   const [catType, setCatType] = useState<'expense'|'income'>('expense');
+  const [newCatBudget, setNewCatBudget] = useState(''); // New State for Budget
   
-  // Keys
   const [finnhubKey, setFinnhubKey] = useState(localStorage.getItem('finnhub_key') || '');
   const [geminiKey, setGeminiKey] = useState(localStorage.getItem('user_gemini_key') || '');
   
-  // Join Group
   const [joinId, setJoinId] = useState('');
 
   const handleSaveKeys = () => {
@@ -155,7 +154,7 @@ export const SettingsModal = ({ onClose, onExport, onImport, currentGroupId, cat
         <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
            <button onClick={() => setActiveTab('general')} className={`flex-1 py-2 text-xs font-bold rounded-lg ${activeTab === 'general' ? 'bg-white shadow' : 'text-slate-400'}`}>一般 / 群組</button>
            <button onClick={() => setActiveTab('keys')} className={`flex-1 py-2 text-xs font-bold rounded-lg ${activeTab === 'keys' ? 'bg-white shadow' : 'text-slate-400'}`}>API 金鑰</button>
-           <button onClick={() => setActiveTab('category')} className={`flex-1 py-2 text-xs font-bold rounded-lg ${activeTab === 'category' ? 'bg-white shadow' : 'text-slate-400'}`}>分類</button>
+           <button onClick={() => setActiveTab('category')} className={`flex-1 py-2 text-xs font-bold rounded-lg ${activeTab === 'category' ? 'bg-white shadow' : 'text-slate-400'}`}>分類與預算</button>
         </div>
 
         {activeTab === 'general' && (
@@ -187,6 +186,15 @@ export const SettingsModal = ({ onClose, onExport, onImport, currentGroupId, cat
                 </div>
              </div>
 
+             <div className="flex gap-3">
+                <button onClick={onExport} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-slate-200">
+                    <Download size={16}/> 備份 (JSON)
+                </button>
+                <button onClick={onExportCSV} className="flex-1 bg-emerald-50 text-emerald-600 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-emerald-100 border border-emerald-100">
+                    <FileSpreadsheet size={16}/> 匯出 Excel
+                </button>
+             </div>
+
              <button onClick={() => { auth.signOut(); onClose(); }} className="w-full bg-red-50 text-red-500 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-red-100 transition-colors">
                 <LogOut size={18}/> 登出帳號
              </button>
@@ -212,21 +220,33 @@ export const SettingsModal = ({ onClose, onExport, onImport, currentGroupId, cat
 
         {activeTab === 'category' && (
            <div className="space-y-4">
-              <div className="flex gap-2 items-end">
-                 <div className="flex-1">
-                    <label className={styles.label}>分類名稱</label>
-                    <input placeholder="例如: 娛樂" className={`${styles.input} py-2 text-sm`} value={newCat} onChange={e => setNewCat(e.target.value)} />
+              <div className="flex flex-col gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                 <div className="flex gap-2 items-center">
+                     <div className="flex-1">
+                        <label className={styles.label}>分類名稱</label>
+                        <input placeholder="例如: 娛樂" className={`${styles.input} py-2 text-sm`} value={newCat} onChange={e => setNewCat(e.target.value)} />
+                     </div>
+                     <div className="w-24">
+                         <label className={styles.label}>類型</label>
+                         <select className="border rounded-lg px-2 py-2 text-sm h-[38px] w-full bg-white" value={catType} onChange={(e:any)=>setCatType(e.target.value)}><option value="expense">支出</option><option value="income">收入</option></select>
+                     </div>
                  </div>
-                 <div>
-                     <label className={styles.label}>類型</label>
-                     <select className="border rounded-lg px-2 py-2 text-sm h-[38px] bg-white" value={catType} onChange={(e:any)=>setCatType(e.target.value)}><option value="expense">支出</option><option value="income">收入</option></select>
+                 <div className="flex gap-2 items-end">
+                     <div className="flex-1">
+                         <label className={styles.label}>每月預算 (可選)</label>
+                         <input type="number" placeholder="0 = 無限制" className={`${styles.input} py-2 text-sm`} value={newCatBudget} onChange={e => setNewCatBudget(e.target.value)} />
+                     </div>
+                     <button onClick={()=>{onAddCategory(newCat, catType, parseFloat(newCatBudget)); setNewCat(''); setNewCatBudget('');}} className="bg-indigo-600 text-white px-4 py-2 h-[38px] rounded-lg font-bold text-sm mb-[1px] flex items-center gap-1"><PlusIcon size={14}/> 新增</button>
                  </div>
-                 <button onClick={()=>{onAddCategory(newCat, catType); setNewCat('');}} className="bg-indigo-600 text-white px-3 py-2 h-[38px] rounded-lg font-bold text-sm mb-[1px]">新增</button>
               </div>
+
               <div className="max-h-60 overflow-y-auto space-y-2">
                  {categories.map((c: Category) => (
                     <div key={c.id} className="flex justify-between items-center p-2 bg-slate-50 rounded border border-slate-100">
-                       <span className="text-sm font-bold flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${c.type==='expense'?'bg-red-400':'bg-emerald-400'}`}></div>{c.name}</span>
+                       <div>
+                           <span className="text-sm font-bold flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${c.type==='expense'?'bg-red-400':'bg-emerald-400'}`}></div>{c.name}</span>
+                           {c.budgetLimit && c.budgetLimit > 0 && <div className="text-xs text-slate-400 pl-4">預算: ${c.budgetLimit.toLocaleString()}</div>}
+                       </div>
                        <button onClick={()=>onDeleteCategory(c.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button>
                     </div>
                  ))}
@@ -238,7 +258,7 @@ export const SettingsModal = ({ onClose, onExport, onImport, currentGroupId, cat
   );
 }
 
-// --- Transactions (Updated for Advanced Split & Auto Calc) ---
+// --- Transactions ---
 export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData }: any) => {
    const [type, setType] = useState<'expense'|'income'>(editData?.type || 'expense');
    const [amount, setAmount] = useState(editData?.totalAmount?.toString() || '');
@@ -246,14 +266,10 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
    const [category, setCategory] = useState(editData?.category || '');
    const [date, setDate] = useState(editData?.date?.seconds ? new Date(editData.date.seconds*1000).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
    
-   // Split & Payer Mode States
    const [payerMode, setPayerMode] = useState<'single'|'multi'>('single');
    const [splitMode, setSplitMode] = useState<'equal'|'custom'>('equal');
-   
-   // Recurring State
    const [isRecurring, setIsRecurring] = useState(false);
 
-   // Data holding for advanced modes
    const [mainPayerId, setMainPayerId] = useState(editData ? Object.keys(editData.payers)[0] : (people.find((p:any)=>p.isMe||p.uid===auth.currentUser?.uid)?.id || people[0]?.id || ''));
    const [multiPayers, setMultiPayers] = useState<Record<string, string>>(
       editData && Object.keys(editData.payers).length > 1 
@@ -269,17 +285,14 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
 
    const [loadingAI, setLoadingAI] = useState(false);
    
-   // Determine initial modes based on editData
    useEffect(() => {
       if(editData) {
           if(Object.keys(editData.payers).length > 1) setPayerMode('multi');
-          
-          // Simple heuristic for equal split: variance is low
           const values: number[] = Object.values(editData.splitDetails);
           if(values.length > 0) {
               const min = Math.min(...values);
               const max = Math.max(...values);
-              if(max - min > 1) setSplitMode('custom'); // If difference is more than 1 dollar, treat as custom
+              if(max - min > 1) setSplitMode('custom');
           }
       }
    }, []);
@@ -287,39 +300,25 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
    const currentCats = categories.filter((c:any) => c.type === type);
    useEffect(() => { if(currentCats.length > 0 && !category) setCategory(currentCats[0].name); }, [type, categories]);
 
-   // Calculations for validation
    const totalAmountVal = parseFloat(String(amount)) || 0;
-   
    const payerSum = payerMode === 'single' ? totalAmountVal : Object.values(multiPayers).reduce((acc: number, val) => acc + (parseFloat(val as string)||0), 0);
    const splitSum = splitMode === 'equal' ? totalAmountVal : Object.values(customSplits).reduce((acc: number, val) => acc + (parseFloat(val as string)||0), 0);
-   
    const isValidPayer = Math.abs(payerSum - totalAmountVal) < 1;
    const isValidSplit = Math.abs(splitSum - totalAmountVal) < 1;
 
-   // --- Auto Calculation Handlers ---
-
    const fillRemainder = (id: string, currentMap: Record<string, string>, setMap: Function) => {
        if (totalAmountVal <= 0) return;
-       const otherSum = Object.entries(currentMap)
-           .filter(([k, v]) => k !== id)
-           .reduce((acc: number, [k, v]) => {
-               const val = parseFloat(v as string);
-               return acc + (isNaN(val) ? 0 : val);
-           }, 0);
+       const otherSum = Object.entries(currentMap).filter(([k, v]) => k !== id).reduce((acc: number, [k, v]) => acc + (parseFloat(v as string)||0), 0);
        const remainder = Math.max(0, totalAmountVal - otherSum);
-       const valStr = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(1);
-       setMap({ ...currentMap, [id]: valStr });
+       setMap({ ...currentMap, [id]: Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(1) });
    };
 
    const handlePayerChange = (id: string, val: string) => {
-       const newVal = val;
-       const numVal = parseFloat(val as string) || 0;
-       const newMap = { ...multiPayers, [id]: newVal };
-
+       const newMap = { ...multiPayers, [id]: val };
        if (people.length === 2 && totalAmountVal > 0) {
            const other = people.find((p: any) => p.id !== id);
            if (other) {
-               const remainder = Math.max(0, totalAmountVal - numVal);
+               const remainder = Math.max(0, totalAmountVal - (parseFloat(val)||0));
                newMap[other.id] = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(1);
            }
        }
@@ -327,14 +326,11 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
    };
 
    const handleSplitChange = (id: string, val: string) => {
-       const newVal = val;
-       const numVal = parseFloat(val as string) || 0;
-       const newMap = { ...customSplits, [id]: newVal };
-
+       const newMap = { ...customSplits, [id]: val };
        if (people.length === 2 && totalAmountVal > 0) {
            const other = people.find((p: any) => p.id !== id);
            if (other) {
-               const remainder = Math.max(0, totalAmountVal - numVal);
+               const remainder = Math.max(0, totalAmountVal - (parseFloat(val)||0));
                newMap[other.id] = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(1);
            }
        }
@@ -360,70 +356,31 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
 
    const handleSave = async () => {
       if(!amount || !description) return;
-      
       if(type === 'expense') {
         if(!isValidPayer) { alert(`付款金額總和 (${payerSum}) 不等於總金額 (${totalAmountVal})`); return; }
         if(!isValidSplit) { alert(`分帳金額總和 (${splitSum}) 不等於總金額 (${totalAmountVal})`); return; }
       }
-
       const finalAmt = totalAmountVal;
-      
-      // Construct Payers
       let payers: Record<string, number> = {};
-      if(payerMode === 'single') {
-          payers[mainPayerId] = finalAmt;
-      } else {
-          Object.entries(multiPayers).forEach(([pid, val]) => {
-             if(parseFloat(val as string) > 0) payers[pid] = parseFloat(val as string);
-          });
-      }
+      if(payerMode === 'single') payers[mainPayerId] = finalAmt;
+      else Object.entries(multiPayers).forEach(([pid, val]) => { if(parseFloat(val as string)>0) payers[pid] = parseFloat(val as string); });
 
-      // Construct Splits
       let splits: Record<string, number> = {};
-      if(splitMode === 'equal') {
-          const splitAmt = finalAmt / (people.length||1);
-          people.forEach((p:any) => splits[p.id] = splitAmt);
-      } else {
-          Object.entries(customSplits).forEach(([pid, val]) => {
-             if(parseFloat(val as string) > 0) splits[pid] = parseFloat(val as string);
-          });
-      }
+      if(splitMode === 'equal') { const splitAmt = finalAmt / (people.length||1); people.forEach((p:any) => splits[p.id] = splitAmt); }
+      else Object.entries(customSplits).forEach(([pid, val]) => { if(parseFloat(val as string)>0) splits[pid] = parseFloat(val as string); });
 
-      const data = { 
-          totalAmount: finalAmt, 
-          description, 
-          category, 
-          type, 
-          payers, 
-          splitDetails: splits, 
-          date: Timestamp.fromDate(new Date(date)), 
-          currency: 'TWD' 
-      };
-      
+      const data = { totalAmount: finalAmt, description, category, type, payers, splitDetails: splits, date: Timestamp.fromDate(new Date(date)), currency: 'TWD' };
       const col = collection(db, getCollectionPath(userId, groupId, 'transactions'));
       if (editData) await updateDoc(doc(col, editData.id), data);
       else await addDoc(col, data);
 
-      // Create Recurring Rule if requested
       if (isRecurring && !editData) {
-          const nextMonthDate = new Date(date);
-          nextMonthDate.setMonth(nextMonthDate.getMonth() + 1);
-          
-          const ruleData = {
-              name: description,
-              amount: finalAmt,
-              type,
-              category,
-              payerId: mainPayerId, // For simple backward compat
-              payers, // Complex support
-              splitDetails: splits, // Complex support
-              frequency: 'monthly',
-              active: true,
-              nextDate: Timestamp.fromDate(nextMonthDate)
-          };
-          await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), ruleData);
+          const nextMonthDate = new Date(date); nextMonthDate.setMonth(nextMonthDate.getMonth() + 1);
+          await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), {
+              name: description, amount: finalAmt, type, category, payerId: mainPayerId, payers, splitDetails: splits,
+              frequency: 'monthly', active: true, nextDate: Timestamp.fromDate(nextMonthDate)
+          });
       }
-
       onClose();
    };
 
@@ -442,12 +399,8 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                   <button onClick={()=>setType('income')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='income'?'bg-white shadow text-emerald-600':'text-slate-400'}`}>收入</button>
                </div>
                
-               <div>
-                  <label className={styles.label}>金額</label>
-                  <input type="number" placeholder="0" className="text-4xl font-bold w-full text-center border-b pb-2 outline-none bg-transparent" value={amount} onChange={e=>setAmount(e.target.value)} />
-               </div>
+               <div><label className={styles.label}>金額</label><input type="number" placeholder="0" className="text-4xl font-bold w-full text-center border-b pb-2 outline-none bg-transparent" value={amount} onChange={e=>setAmount(e.target.value)} /></div>
 
-               {/* Payer Section */}
                {type === 'expense' && (
                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
                        <div className="flex justify-between items-center mb-2">
@@ -459,43 +412,19 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                                </div>
                            )}
                        </div>
-                       
                        {payerMode === 'single' ? (
-                           <select className={styles.input} value={mainPayerId} onChange={e=>setMainPayerId(e.target.value)}>
-                               {people.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}
-                           </select>
+                           <select className={styles.input} value={mainPayerId} onChange={e=>setMainPayerId(e.target.value)}>{people.map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
                        ) : (
                            <div className="space-y-2">
                                {people.map((p:any) => (
-                                   <div key={p.id} className="flex items-center gap-2">
-                                       <span className="text-sm w-16 truncate">{p.name}</span>
-                                       <input 
-                                          type="number" 
-                                          placeholder="0" 
-                                          className="flex-1 p-2 rounded border text-sm" 
-                                          value={multiPayers[p.id] || ''} 
-                                          onChange={e=>handlePayerChange(p.id, e.target.value)}
-                                       />
-                                       {people.length > 2 && (
-                                            <button 
-                                                onClick={() => fillRemainder(p.id, multiPayers, setMultiPayers)}
-                                                className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"
-                                                title="填入剩餘金額"
-                                            >
-                                                <Wand2 size={14} />
-                                            </button>
-                                       )}
-                                   </div>
+                                   <div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={multiPayers[p.id] || ''} onChange={e=>handlePayerChange(p.id, e.target.value)}/>{people.length > 2 && (<button onClick={() => fillRemainder(p.id, multiPayers, setMultiPayers)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>
                                ))}
-                               <div className={`text-xs text-right font-bold ${isValidPayer?'text-emerald-500':'text-red-500'}`}>
-                                   合計: {Math.round(payerSum)} / 目標: {totalAmountVal}
-                               </div>
+                               <div className={`text-xs text-right font-bold ${isValidPayer?'text-emerald-500':'text-red-500'}`}>合計: {Math.round(payerSum)} / 目標: {totalAmountVal}</div>
                            </div>
                        )}
                    </div>
                )}
 
-               {/* Split Section */}
                {type === 'expense' && people.length > 1 && (
                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
                        <div className="flex justify-between items-center mb-2">
@@ -505,63 +434,25 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                                <button onClick={()=>setSplitMode('custom')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode==='custom'?'bg-indigo-50 text-indigo-600 font-bold':'text-slate-400'}`}>自訂</button>
                            </div>
                        </div>
-                       
                        {splitMode === 'equal' ? (
-                           <div className="text-center text-xs text-slate-500 py-2 bg-white rounded-lg border border-dashed">
-                               每人負擔約 <span className="font-bold text-indigo-600">${(totalAmountVal / people.length).toFixed(1)}</span>
-                           </div>
+                           <div className="text-center text-xs text-slate-500 py-2 bg-white rounded-lg border border-dashed">每人負擔約 <span className="font-bold text-indigo-600">${(totalAmountVal / people.length).toFixed(1)}</span></div>
                        ) : (
                            <div className="space-y-2">
                                {people.map((p:any) => (
-                                   <div key={p.id} className="flex items-center gap-2">
-                                       <span className="text-sm w-16 truncate">{p.name}</span>
-                                       <input 
-                                          type="number" 
-                                          placeholder="0" 
-                                          className="flex-1 p-2 rounded border text-sm" 
-                                          value={customSplits[p.id] || ''} 
-                                          onChange={e=>handleSplitChange(p.id, e.target.value)}
-                                       />
-                                       {people.length > 2 && (
-                                            <button 
-                                                onClick={() => fillRemainder(p.id, customSplits, setCustomSplits)}
-                                                className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"
-                                                title="填入剩餘金額"
-                                            >
-                                                <Wand2 size={14} />
-                                            </button>
-                                       )}
-                                   </div>
+                                   <div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={customSplits[p.id] || ''} onChange={e=>handleSplitChange(p.id, e.target.value)}/>{people.length > 2 && (<button onClick={() => fillRemainder(p.id, customSplits, setCustomSplits)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>
                                ))}
-                               <div className={`text-xs text-right font-bold ${isValidSplit?'text-emerald-500':'text-red-500'}`}>
-                                   合計: {Math.round(splitSum)} / 目標: {totalAmountVal}
-                               </div>
+                               <div className={`text-xs text-right font-bold ${isValidSplit?'text-emerald-500':'text-red-500'}`}>合計: {Math.round(splitSum)} / 目標: {totalAmountVal}</div>
                            </div>
                        )}
                    </div>
                )}
 
                <div><label className={styles.label}>項目說明</label><input placeholder="例如: 午餐" className={styles.input} value={description} onChange={e=>setDescription(e.target.value)} /></div>
-               
                <div className="grid grid-cols-2 gap-3">
                   <div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e=>setDate(e.target.value)} /></div>
-                  <div>
-                      <label className={styles.label}>分類</label>
-                      <select className={styles.input} value={category} onChange={e=>setCategory(e.target.value)}>
-                          {currentCats.map((c:any)=><option key={c.id} value={c.name}>{c.name}</option>)}
-                      </select>
-                  </div>
+                  <div><label className={styles.label}>分類</label><select className={styles.input} value={category} onChange={e=>setCategory(e.target.value)}>{currentCats.map((c:any)=><option key={c.id} value={c.name}>{c.name}</option>)}</select></div>
                </div>
-
-               {!editData && (
-                  <div className="flex items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100">
-                     <input type="checkbox" id="recurring" checked={isRecurring} onChange={e=>setIsRecurring(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500"/>
-                     <label htmlFor="recurring" className="text-sm font-bold text-indigo-700 flex items-center gap-2 cursor-pointer select-none">
-                         <Repeat size={16}/> 每月自動執行此交易
-                     </label>
-                  </div>
-               )}
-               
+               {!editData && (<div className="flex items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100"><input type="checkbox" id="recurring" checked={isRecurring} onChange={e=>setIsRecurring(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500"/><label htmlFor="recurring" className="text-sm font-bold text-indigo-700 flex items-center gap-2 cursor-pointer select-none"><Repeat size={16}/> 每月自動執行此交易</label></div>)}
                <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div>
             </div>
          </div>
@@ -589,9 +480,9 @@ export const CardDetailModal = ({ userId, card, cardLogs, transactions, allCardL
    const availableTrans = transactions.filter((t:any) => !globalUsedIds.includes(t.id)).slice(0, 30);
    const viewLogs = cardLogs.filter((l:any) => {
       if(!l.date?.seconds) return false;
-      const d = new Date(l.date.seconds*1000);
+      const d = new Date((l.date.seconds as number)*1000);
       return d >= currentCycleStart && d <= currentCycleEnd;
-   }).sort((a:any,b:any) => b.date.seconds - a.date.seconds);
+   }).sort((a:any,b:any) => (b.date.seconds as number) - (a.date.seconds as number));
    const handleSaveLog = async () => {
       if(!amt || !desc) return;
       const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));
@@ -599,10 +490,10 @@ export const CardDetailModal = ({ userId, card, cardLogs, transactions, allCardL
       if (editingId) { await updateDoc(doc(col, editingId), payload); setEditingId(null); } else { await addDoc(col, { ...payload, isReconciled: false }); }
       setAmt(''); setDesc(''); setShowAddLog(false);
    };
-   const handleEditClick = (log: any) => { setEditingId(log.id); setAmt(log.amount.toString()); setDesc(log.description); setDate(new Date(log.date.seconds * 1000).toISOString().split('T')[0]); setShowAddLog(true); };
+   const handleEditClick = (log: any) => { setEditingId(log.id); setAmt(log.amount.toString()); setDesc(log.description); setDate(new Date((log.date.seconds as number) * 1000).toISOString().split('T')[0]); setShowAddLog(true); };
    const handleDeleteClick = async (id: string) => { if (window.confirm('確定要刪除此筆刷卡紀錄嗎？(需二次確認)')) { await deleteDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), id)); if (editingId === id) { setShowAddLog(false); setEditingId(null); } } };
    const linkTrans = async (transId: string) => { if(!linkLog) return; await updateDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), linkLog.id), { isReconciled: true, linkedTransactionId: transId }); setLinkLog(null); }
-   return ( <div className={styles.overlay}> {linkLog ? ( <div className={styles.content}> <div className="flex justify-between items-center mb-4"><h3 className="font-bold">連結記帳資料</h3><button onClick={()=>setLinkLog(null)}><X/></button></div> <div className="space-y-2 max-h-80 overflow-y-auto"> {availableTrans.map((t:any) => ( <div key={t.id} onClick={() => linkTrans(t.id)} className="bg-white p-3 border rounded-xl hover:border-indigo-500 cursor-pointer flex justify-between"> <div> <div className="font-bold text-sm">{t.description}</div> <div className="text-xs text-slate-400 font-bold text-indigo-500">{t.date?.seconds ? new Date(t.date.seconds*1000).toLocaleDateString() : ''}</div> </div> <div className="font-bold">${t.totalAmount}</div> </div> ))} </div> </div> ) : ( <div className={`${styles.content} h-[85vh]`}> <div className="flex justify-between items-center mb-4"> <div><h3 className="font-bold text-xl">{card.name}</h3><div className="text-xs text-slate-500">結帳日: 每月 {card.billingDay} 號</div></div> <button onClick={onClose}><X/></button> </div> <div className="flex items-center justify-between bg-slate-100 p-2 rounded-xl mb-4"> <button onClick={prevCycle} className="p-1 hover:bg-white rounded">◀</button> <div className="text-xs font-bold text-slate-600">{currentCycleStart.toLocaleDateString()} ~ {currentCycleEnd.toLocaleDateString()}</div> <button onClick={nextCycle} className="p-1 hover:bg-white rounded">▶</button> </div> <button onClick={() => { setShowAddLog(!showAddLog); setEditingId(null); setAmt(''); setDesc(''); }} className="w-full py-2 mb-4 border-2 border-dashed border-indigo-200 text-indigo-600 rounded-xl font-bold text-sm">{showAddLog && !editingId ? '隱藏新增' : '+ 新增刷卡紀錄'}</button> {showAddLog && ( <div className="bg-slate-50 p-4 rounded-xl border mb-4 space-y-2 animate-in slide-in-from-bottom-4"> <div className="text-xs font-bold text-indigo-500 mb-1">{editingId ? '編輯紀錄' : '新增紀錄'}</div> <div className="flex gap-2"> <div className="flex-1"><label className={styles.label}>日期</label><input type="date" className="w-full p-2 rounded border text-sm" value={date} onChange={e=>setDate(e.target.value)} /></div> <div className="flex-1"><label className={styles.label}>金額</label><input type="number" className="w-full p-2 rounded border text-sm" value={amt} onChange={e=>setAmt(e.target.value)} /></div> </div> <div><label className={styles.label}>說明</label><div className="flex gap-2"><input className="flex-1 p-2 rounded border text-sm" value={desc} onChange={e=>setDesc(e.target.value)} /><button onClick={handleSaveLog} className="bg-indigo-600 text-white px-4 rounded text-xs font-bold">{editingId ? '更新' : '存'}</button></div></div> </div> )} <div className="space-y-2 max-h-[50vh] overflow-y-auto"> {viewLogs.length === 0 && <div className="text-center text-slate-400 py-4">此週期無紀錄</div>} {viewLogs.map((log:any) => { const linkedT = transactions.find((t:any) => t.id === log.linkedTransactionId); return ( <div key={log.id} className={`p-3 rounded-xl border ${log.isReconciled ? 'bg-emerald-50/50 border-emerald-100' : 'bg-white border-slate-200'}`}> <div className="flex justify-between items-center mb-1"> <div className="flex items-center gap-2"> <button onClick={async()=>{await updateDoc(doc(db,getCollectionPath(userId,null,'cardLogs'),log.id),{isReconciled:!log.isReconciled})}}>{log.isReconciled?<CheckCircle size={18} className="text-emerald-500"/>:<Circle size={18} className="text-slate-300"/>}</button> <span className={`text-sm font-bold ${log.isReconciled?'text-slate-400 line-through':''}`}>{log.description}</span> </div> <div className="font-bold font-mono">${log.amount}</div> </div> <div className="flex justify-between items-center pl-7"> <div className="text-[10px] text-slate-400">{new Date(log.date.seconds*1000).toLocaleDateString()}</div> <div className="flex items-center gap-2"> {!log.isReconciled && <button onClick={()=>setLinkLog(log)} className="text-[10px] flex gap-1 bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold"><LinkIcon size={10}/> 連結</button>} {log.isReconciled && linkedT && <span className="text-[10px] text-emerald-600 flex gap-1 bg-emerald-50 px-2 py-1 rounded"><Link2 size={10}/> {linkedT.description}</span>} <button onClick={() => handleEditClick(log)} className="text-slate-400 hover:text-indigo-600"><Edit size={12}/></button> <button onClick={() => handleDeleteClick(log.id)} className="text-slate-400 hover:text-red-600"><Trash2 size={12}/></button> </div> </div> </div> ) })} </div> </div> )} </div> )
+   return ( <div className={styles.overlay}> {linkLog ? ( <div className={styles.content}> <div className="flex justify-between items-center mb-4"><h3 className="font-bold">連結記帳資料</h3><button onClick={()=>setLinkLog(null)}><X/></button></div> <div className="space-y-2 max-h-80 overflow-y-auto"> {availableTrans.map((t:any) => ( <div key={t.id} onClick={() => linkTrans(t.id)} className="bg-white p-3 border rounded-xl hover:border-indigo-500 cursor-pointer flex justify-between"> <div> <div className="font-bold text-sm">{t.description}</div> <div className="text-xs text-slate-400 font-bold text-indigo-500">{t.date?.seconds ? new Date(t.date.seconds*1000).toLocaleDateString() : ''}</div> </div> <div className="font-bold">${t.totalAmount}</div> </div> ))} </div> </div> ) : ( <div className={`${styles.content} h-[85vh]`}> <div className="flex justify-between items-center mb-4"> <div><h3 className="font-bold text-xl">{card.name}</h3><div className="text-xs text-slate-500">結帳日: 每月 {card.billingDay} 號</div></div> <button onClick={onClose}><X/></button> </div> <div className="flex items-center justify-between bg-slate-100 p-2 rounded-xl mb-4"> <button onClick={prevCycle} className="p-1 hover:bg-white rounded">◀</button> <div className="text-xs font-bold text-slate-600">{currentCycleStart.toLocaleDateString()} ~ {currentCycleEnd.toLocaleDateString()}</div> <button onClick={nextCycle} className="p-1 hover:bg-white rounded">▶</button> </div> <button onClick={() => { setShowAddLog(!showAddLog); setEditingId(null); setAmt(''); setDesc(''); }} className="w-full py-2 mb-4 border-2 border-dashed border-indigo-200 text-indigo-600 rounded-xl font-bold text-sm">{showAddLog && !editingId ? '隱藏新增' : '+ 新增刷卡紀錄'}</button> {showAddLog && ( <div className="bg-slate-50 p-4 rounded-xl border mb-4 space-y-2 animate-in slide-in-from-bottom-4"> <div className="text-xs font-bold text-indigo-500 mb-1">{editingId ? '編輯紀錄' : '新增紀錄'}</div> <div className="flex gap-2"> <div className="flex-1"><label className={styles.label}>日期</label><input type="date" className="w-full p-2 rounded border text-sm" value={date} onChange={e=>setDate(e.target.value)} /></div> <div className="flex-1"><label className={styles.label}>金額</label><input type="number" className="w-full p-2 rounded border text-sm" value={amt} onChange={e=>setAmt(e.target.value)} /></div> </div> <div><label className={styles.label}>說明</label><div className="flex gap-2"><input className="flex-1 p-2 rounded border text-sm" value={desc} onChange={e=>setDesc(e.target.value)} /><button onClick={handleSaveLog} className="bg-indigo-600 text-white px-4 rounded text-xs font-bold">{editingId ? '更新' : '存'}</button></div></div> </div> )} <div className="space-y-2 max-h-[50vh] overflow-y-auto"> {viewLogs.length === 0 && <div className="text-center text-slate-400 py-4">此週期無紀錄</div>} {viewLogs.map((log:any) => { const linkedT = transactions.find((t:any) => t.id === log.linkedTransactionId); return ( <div key={log.id} className={`p-3 rounded-xl border ${log.isReconciled ? 'bg-emerald-50/50 border-emerald-100' : 'bg-white border-slate-200'}`}> <div className="flex justify-between items-center mb-1"> <div className="flex items-center gap-2"> <button onClick={async()=>{await updateDoc(doc(db,getCollectionPath(userId,null,'cardLogs'),log.id),{isReconciled:!log.isReconciled})}}>{log.isReconciled?<CheckCircle size={18} className="text-emerald-500"/>:<Circle size={18} className="text-slate-300"/>}</button> <span className={`text-sm font-bold ${log.isReconciled?'text-slate-400 line-through':''}`}>{log.description}</span> </div> <div className="font-bold font-mono">${log.amount}</div> </div> <div className="flex justify-between items-center pl-7"> <div className="text-[10px] text-slate-400">{new Date((log.date.seconds as number)*1000).toLocaleDateString()}</div> <div className="flex items-center gap-2"> {!log.isReconciled && <button onClick={()=>setLinkLog(log)} className="text-[10px] flex gap-1 bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold"><LinkIcon size={10}/> 連結</button>} {log.isReconciled && linkedT && <span className="text-[10px] text-emerald-600 flex gap-1 bg-emerald-50 px-2 py-1 rounded"><Link2 size={10}/> {linkedT.description}</span>} <button onClick={() => handleEditClick(log)} className="text-slate-400 hover:text-indigo-600"><Edit size={12}/></button> <button onClick={() => handleDeleteClick(log.id)} className="text-slate-400 hover:text-red-600"><Trash2 size={12}/></button> </div> </div> </div> ) })} </div> </div> )} </div> )
 }
 
 export const AddPlatformModal = ({ userId, onClose, editData }: any) => {
@@ -660,7 +551,41 @@ export const BankDetailModal = ({ userId, account, logs, onClose }: any) => {
    const [amount, setAmount] = useState(''); const [type, setType] = useState<'in'|'out'>('out'); const [desc, setDesc] = useState('');
    const handleSave = async () => { if(!amount) return; await addDoc(collection(db, getCollectionPath(userId, null, 'bankLogs')), { accountId: account.id, type, amount: parseFloat(amount), date: serverTimestamp(), description: desc || (type==='in'?'存款':'提款') }); setAmount(''); setDesc(''); };
    const handleDelete = async (id: string) => { if(confirm('確定刪除此紀錄?')) await deleteDoc(doc(db, getCollectionPath(userId, null, 'bankLogs'), id)); };
-   return ( <div className={styles.overlay}><div className={styles.content}> <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">{account.name}</h3><button onClick={onClose}><X/></button></div> <div className="bg-slate-50 p-4 rounded-xl mb-4 text-center"> <div className="text-xs text-slate-400">目前餘額</div> <div className="text-3xl font-bold text-slate-800">${account.currentBalance?.toLocaleString()}</div> </div> <div className="flex gap-2 mb-4"> <select className="w-20 rounded-xl border px-2 bg-white" value={type} onChange={(e:any)=>setType(e.target.value)}><option value="out">支出</option><option value="in">收入</option></select> <input placeholder="金額" type="number" className="flex-1 rounded-xl border px-3 py-2" value={amount} onChange={e=>setAmount(e.target.value)} /> <input placeholder="備註" className="flex-1 rounded-xl border px-3 py-2" value={desc} onChange={e=>setDesc(e.target.value)} /> <button onClick={handleSave} className="bg-indigo-600 text-white px-4 rounded-xl font-bold">存</button> </div> <div className="space-y-2 max-h-[40vh] overflow-y-auto"> {logs.sort((a:any,b:any)=>(b.date?.seconds||0)-(a.date?.seconds||0)).map((l:any) => ( <div key={l.id} className="flex justify-between items-center p-3 border-b last:border-0"> <div> <div className="font-bold text-sm text-slate-700">{l.description}</div> <div className="text-xs text-slate-400">{l.date?.seconds?new Date(l.date.seconds*1000).toLocaleDateString():''}</div> </div> <div className="flex items-center gap-3"> <div className={`font-bold ${l.type==='in'?'text-emerald-600':'text-slate-800'}`}>{l.type==='in'?'+':''}{l.amount.toLocaleString()}</div> <button onClick={()=>handleDelete(l.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button> </div> </div> ))} </div> </div></div> )
+   
+   const groupedLogs = logs.sort((a:any,b:any)=>((b.date?.seconds as number)||0)-((a.date?.seconds as number)||0)).reduce((acc:any, log:any) => {
+      const d = log.date?.seconds ? new Date(log.date.seconds*1000) : new Date();
+      const key = `${d.getFullYear()}年${d.getMonth()+1}月`;
+      if(!acc[key]) acc[key] = [];
+      acc[key].push(log);
+      return acc;
+   }, {});
+   const sortedMonths = Object.keys(groupedLogs).sort((a,b) => b.localeCompare(a, 'zh-TW', {numeric: true}));
+
+   return ( 
+     <div className={styles.overlay}>
+       <div className={styles.content}> 
+         <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">{account.name}</h3><button onClick={onClose}><X/></button></div> 
+         <div className="bg-slate-50 p-4 rounded-xl mb-4 text-center"> <div className="text-xs text-slate-400">目前餘額</div> <div className="text-3xl font-bold text-slate-800">${account.currentBalance?.toLocaleString()}</div> </div> 
+         <div className="flex gap-2 mb-4"> <select className="w-20 rounded-xl border px-2 bg-white" value={type} onChange={(e:any)=>setType(e.target.value)}><option value="out">支出</option><option value="in">收入</option></select> <input placeholder="金額" type="number" className="flex-1 rounded-xl border px-3 py-2" value={amount} onChange={e=>setAmount(e.target.value)} /> <input placeholder="備註" className="flex-1 rounded-xl border px-3 py-2" value={desc} onChange={e=>setDesc(e.target.value)} /> <button onClick={handleSave} className="bg-indigo-600 text-white px-4 rounded-xl font-bold">存</button> </div> 
+         <div className="space-y-4 max-h-[40vh] overflow-y-auto"> 
+           {logs.length === 0 && <div className="text-center text-slate-300 py-4">無紀錄</div>}
+           {sortedMonths.map((month:any) => (
+              <div key={month}>
+                  <div className="text-xs font-bold text-slate-400 mb-2 ml-1">{month}</div>
+                  <div className="space-y-2">
+                      {groupedLogs[month].map((l:any) => (
+                         <div key={l.id} className="flex justify-between items-center p-3 border-b last:border-0"> 
+                            <div> <div className="font-bold text-sm text-slate-700">{l.description}</div> <div className="text-xs text-slate-400">{l.date?.seconds?new Date((l.date.seconds as number)*1000).toLocaleDateString():''}</div> </div> 
+                            <div className="flex items-center gap-3"> <div className={`font-bold ${l.type==='in'?'text-emerald-600':'text-slate-800'}`}>{l.type==='in'?'+':''}{l.amount.toLocaleString()}</div> <button onClick={()=>handleDelete(l.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button> </div> 
+                         </div>
+                      ))}
+                  </div>
+              </div>
+           ))}
+         </div> 
+       </div>
+     </div> 
+   )
 }
 
 export const AIAssistantModal = ({ onClose, contextData }: any) => {
@@ -672,28 +597,219 @@ export const AIAssistantModal = ({ onClose, contextData }: any) => {
 }
 
 export const AIBatchImportModal = ({ userId, groupId, categories, existingTransactions, accounts, creditCards, existingBankLogs, existingCardLogs, people, onClose }: any) => {
-   const [text, setText] = useState('');
+   const [mode, setMode] = useState<'text'|'image'>('text');
+   const [target, setTarget] = useState<'ledger'|'bank'|'card'>('ledger');
+   const [targetId, setTargetId] = useState('');
+   
+   const [textInput, setTextInput] = useState('');
+   const [imagePreview, setImagePreview] = useState<string | null>(null);
+   
+   const [parsedItems, setParsedItems] = useState<any[]>([]);
    const [loading, setLoading] = useState(false);
    
-   const handleProcess = async () => {
+   useEffect(() => {
+       if(target === 'bank' && accounts.length > 0) setTargetId(accounts[0].id);
+       if(target === 'card' && creditCards.length > 0) setTargetId(creditCards[0].id);
+   }, [target, accounts, creditCards]);
+
+   const checkDuplicate = (item: any) => {
+       const itemDateStr = item.date;
+       if(target === 'ledger') {
+           return existingTransactions.some((t:any) => {
+               const d = new Date(t.date.seconds*1000).toISOString().split('T')[0];
+               return d === itemDateStr && Math.abs(t.totalAmount - item.amount) < 1;
+           });
+       } else if (target === 'bank') {
+           return existingBankLogs.some((l:any) => {
+               if(l.accountId !== targetId) return false;
+               const d = new Date(l.date.seconds*1000).toISOString().split('T')[0];
+               return d === itemDateStr && Math.abs(l.amount - item.amount) < 1;
+           });
+       } else if (target === 'card') {
+           return existingCardLogs.some((l:any) => {
+               if(l.cardId !== targetId) return false;
+               const d = new Date(l.date.seconds*1000).toISOString().split('T')[0];
+               return d === itemDateStr && Math.abs(l.amount - item.amount) < 1;
+           });
+       }
+       return false;
+   };
+
+   const handleAnalyze = async () => {
+       if ((mode === 'text' && !textInput) || (mode === 'image' && !imagePreview)) return;
        setLoading(true);
        try {
-           await new Promise(r => setTimeout(r, 1000));
-           alert('此功能在此環境中僅為模擬。');
-           onClose();
-       } catch(e) {
-           alert('Error');
+           let prompt = "";
+           if (target === 'ledger') {
+               prompt = `Parse the input into a JSON array of transactions. Fields: date (YYYY-MM-DD, default to today), description, amount (number), type (expense/income), category (choose closest from: ${categories.map((c:any)=>c.name).join(',')}).`;
+           } else if (target === 'bank') {
+               prompt = `Parse the input into a JSON array of bank logs. Fields: date (YYYY-MM-DD), description, amount (number), type (in/out). Note: 'in' is deposit, 'out' is withdrawal.`;
+           } else if (target === 'card') {
+               prompt = `Parse the input into a JSON array of credit card logs. Fields: date (YYYY-MM-DD), description, amount (number). Note: Amount should be positive number.`;
+           }
+
+           const res = await callGemini(prompt, mode === 'image' ? imagePreview! : textInput);
+           const json = JSON.parse(res.replace(/```json/g, '').replace(/```/g, ''));
+           
+           const items = Array.isArray(json) ? json : [json];
+           const processed = items.map((it:any) => ({
+               ...it,
+               id: Math.random().toString(36).substr(2,9),
+               selected: !checkDuplicate(it),
+               isDuplicate: checkDuplicate(it)
+           }));
+           setParsedItems(processed);
+       } catch (e) {
+           console.error(e);
+           alert('解析失敗，請重試');
        } finally {
            setLoading(false);
        }
    };
-   
+
+   const handleSave = async () => {
+       const selected = parsedItems.filter(i => i.selected);
+       if (selected.length === 0) return;
+       setLoading(true);
+       try {
+           const batch = [];
+           if (target === 'ledger') {
+               const col = collection(db, getCollectionPath(userId, groupId, 'transactions'));
+               const payerId = people.find((p:any) => p.isMe || p.uid === userId)?.id || people[0]?.id;
+               for (const item of selected) {
+                   batch.push(addDoc(col, {
+                       totalAmount: item.amount,
+                       description: item.description,
+                       category: item.category || '未分類',
+                       type: item.type || 'expense',
+                       date: Timestamp.fromDate(new Date(item.date)),
+                       currency: 'TWD',
+                       payers: { [payerId]: item.amount },
+                       splitDetails: { [payerId]: item.amount }
+                   }));
+               }
+           } else if (target === 'bank') {
+               const col = collection(db, getCollectionPath(userId, null, 'bankLogs'));
+               for (const item of selected) {
+                   batch.push(addDoc(col, {
+                       accountId: targetId,
+                       type: item.type || 'out',
+                       amount: item.amount,
+                       description: item.description,
+                       date: Timestamp.fromDate(new Date(item.date))
+                   }));
+               }
+           } else if (target === 'card') {
+               const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));
+               for (const item of selected) {
+                   batch.push(addDoc(col, {
+                       cardId: targetId,
+                       amount: item.amount,
+                       description: item.description,
+                       date: Timestamp.fromDate(new Date(item.date)),
+                       isReconciled: false
+                   }));
+               }
+           }
+           await Promise.all(batch);
+           onClose();
+       } catch (e) {
+           console.error(e);
+           alert('儲存失敗');
+       } finally {
+           setLoading(false);
+       }
+   };
+
+   const handleImageChange = (e: any) => {
+       const file = e.target.files?.[0];
+       if (file) {
+           const reader = new FileReader();
+           reader.onloadend = () => setImagePreview(reader.result as string);
+           reader.readAsDataURL(file);
+       }
+   };
+
    return (
        <div className={styles.overlay}>
-           <div className={styles.content}>
-               <h3 className="font-bold text-xl mb-4">AI 批次匯入</h3>
-               <textarea className="w-full h-40 p-3 border rounded-xl mb-4" placeholder="貼上文字..." value={text} onChange={e=>setText(e.target.value)}></textarea>
-               <button onClick={handleProcess} disabled={loading} className={styles.btnPrimary}>{loading?<Loader2 className="animate-spin"/>:'開始分析'}</button>
+           <div className={`${styles.content} max-w-2xl`}>
+               <div className="flex justify-between items-center mb-4">
+                   <h3 className="font-bold text-xl flex items-center gap-2"><Sparkles className="text-indigo-500"/> AI 批次匯入</h3>
+                   <button onClick={onClose}><X size={20}/></button>
+               </div>
+               {parsedItems.length === 0 ? (
+                   <div className="space-y-4">
+                       <div className="grid grid-cols-2 gap-4">
+                           <div>
+                               <label className={styles.label}>匯入目標</label>
+                               <select className={styles.input} value={target} onChange={e=>setTarget(e.target.value as any)}>
+                                   <option value="ledger">記帳 (Ledger)</option>
+                                   <option value="bank">銀行 (Bank)</option>
+                                   <option value="card">信用卡 (Card)</option>
+                               </select>
+                           </div>
+                           <div>
+                               {target === 'bank' && (
+                                   <>
+                                       <label className={styles.label}>選擇帳戶</label>
+                                       <select className={styles.input} value={targetId} onChange={e=>setTargetId(e.target.value)}>{accounts.map((a:any)=><option key={a.id} value={a.id}>{a.name}</option>)}</select>
+                                   </>
+                               )}
+                               {target === 'card' && (
+                                   <>
+                                       <label className={styles.label}>選擇卡片</label>
+                                       <select className={styles.input} value={targetId} onChange={e=>setTargetId(e.target.value)}>{creditCards.map((c:any)=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                                   </>
+                               )}
+                           </div>
+                       </div>
+                       <div className="flex bg-slate-100 p-1 rounded-xl">
+                           <button onClick={()=>setMode('text')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode==='text'?'bg-white shadow text-indigo-600':'text-slate-400'}`}><FileText size={16}/> 文字輸入</button>
+                           <button onClick={()=>setMode('image')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode==='image'?'bg-white shadow text-indigo-600':'text-slate-400'}`}><ImageIcon size={16}/> 圖片上傳</button>
+                       </div>
+                       {mode === 'text' ? (
+                           <textarea className="w-full h-40 p-3 border rounded-xl text-sm" placeholder={`貼上文字內容...\n例如: 1/15 午餐 120\n1/15 計程車 250`} value={textInput} onChange={e=>setTextInput(e.target.value)}></textarea>
+                       ) : (
+                           <div className="border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center bg-slate-50 relative">
+                               {imagePreview ? <img src={imagePreview} className="max-h-40 rounded object-contain" /> : <div className="text-slate-400 text-center"><Camera size={32} className="mx-auto mb-2"/><span className="text-xs">點擊上傳照片</span></div>}
+                               <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleImageChange} />
+                           </div>
+                       )}
+                       <button onClick={handleAnalyze} disabled={loading} className={styles.btnPrimary}>{loading ? <Loader2 className="animate-spin"/> : '開始分析'}</button>
+                   </div>
+               ) : (
+                   <div className="space-y-4">
+                       <div className="flex justify-between items-center">
+                           <div className="text-sm text-slate-500">解析結果 ({parsedItems.length} 筆)</div>
+                           <button onClick={()=>setParsedItems([])} className="text-sm text-indigo-600 font-bold">重新上傳</button>
+                       </div>
+                       <div className="max-h-[50vh] overflow-y-auto space-y-2">
+                           {parsedItems.map((item, idx) => (
+                               <div key={item.id} className={`flex items-center gap-3 p-3 rounded-xl border ${item.isDuplicate ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+                                   <button onClick={()=>{const newItems = [...parsedItems]; newItems[idx].selected = !newItems[idx].selected; setParsedItems(newItems);}}>
+                                       {item.selected ? <CheckSquare className="text-indigo-600"/> : <Square className="text-slate-300"/>}
+                                   </button>
+                                   <div className="flex-1">
+                                       <div className="flex justify-between">
+                                           <input value={item.description} onChange={e=>{const n=[...parsedItems];n[idx].description=e.target.value;setParsedItems(n)}} className="font-bold text-slate-800 text-sm bg-transparent border-b border-transparent focus:border-indigo-300 outline-none w-full" />
+                                           <div className="flex items-center gap-1 text-slate-500">
+                                              {item.isDuplicate && <AlertTriangle size={14} className="text-amber-500"/>}
+                                              <input type="number" value={item.amount} onChange={e=>{const n=[...parsedItems];n[idx].amount=parseFloat(e.target.value);setParsedItems(n)}} className="font-bold text-indigo-600 text-right w-20 bg-transparent border-b border-transparent focus:border-indigo-300 outline-none"/>
+                                           </div>
+                                       </div>
+                                       <div className="flex gap-2 mt-1">
+                                           <input type="date" value={item.date} onChange={e=>{const n=[...parsedItems];n[idx].date=e.target.value;setParsedItems(n)}} className="text-xs text-slate-400 bg-transparent" />
+                                           {target === 'ledger' && (<select value={item.category} onChange={e=>{const n=[...parsedItems];n[idx].category=e.target.value;setParsedItems(n)}} className="text-xs bg-slate-100 rounded px-1">{categories.map((c:any)=><option key={c.id} value={c.name}>{c.name}</option>)}</select>)}
+                                           {(target === 'bank' || target === 'ledger') && (<select value={item.type} onChange={e=>{const n=[...parsedItems];n[idx].type=e.target.value;setParsedItems(n)}} className="text-xs bg-slate-100 rounded px-1">{target==='ledger' ? <><option value="expense">支出</option><option value="income">收入</option></> : <><option value="out">支出</option><option value="in">收入</option></>}</select>)}
+                                       </div>
+                                   </div>
+                                   <button onClick={()=>{setParsedItems(parsedItems.filter((_,i)=>i!==idx))}} className="text-slate-300 hover:text-red-500"><Trash2 size={16}/></button>
+                               </div>
+                           ))}
+                       </div>
+                       <button onClick={handleSave} disabled={loading} className={styles.btnPrimary}>{loading ? <Loader2 className="animate-spin"/> : `確認匯入 (${parsedItems.filter(i=>i.selected).length} 筆)`}</button>
+                   </div>
+               )}
            </div>
        </div>
    )

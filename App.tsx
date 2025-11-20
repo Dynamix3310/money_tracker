@@ -135,7 +135,7 @@ export default function App() {
               await addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'transactions')), newTrans);
               const nextMonth = new Date(nextDate);
               nextMonth.setMonth(nextMonth.getMonth() + 1);
-              await updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'recurring'), rule.id), {
+              await updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'recurring')), {
                   nextDate: Timestamp.fromDate(nextMonth)
               });
           }
@@ -239,6 +239,20 @@ export default function App() {
      const a = document.createElement('a'); a.href = url; a.download = `backup.json`; a.click();
   };
 
+  const exportCSV = () => {
+      if(transactions.length === 0) { alert('無交易資料可匯出'); return; }
+      const headers = ['Date', 'Description', 'Category', 'Type', 'Total Amount', 'Currency', 'Note'];
+      const rows = transactions.map(t => {
+          const d = t.date?.seconds ? new Date(t.date.seconds*1000).toISOString().split('T')[0] : '';
+          return [d, t.description, t.category, t.type, t.totalAmount, t.currency, t.isRecurring?'Recurring':''];
+      });
+      
+      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' }); // BOM for Excel
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `transactions_export.csv`; a.click();
+  };
+
   const handleGroupJoin = async (newGroupId: string) => {
       if (!user) return;
       if (!newGroupId) return;
@@ -327,7 +341,7 @@ export default function App() {
                </div>
             )}
             {activeTab === 'invest' && <PortfolioView holdings={holdings} platforms={platforms} onAddPlatform={()=>setActiveModal('add-platform')} onManagePlatform={()=>setActiveModal('manage-platforms')} onManageCash={(p:any)=>{setSelectedItem(p);setActiveModal('manage-cash')}} onAddAsset={()=>setActiveModal('add-asset')} onUpdatePrices={() => updateAssetPrices(true)} onEdit={(h:any)=>{setSelectedItem(h);setActiveModal('edit-asset')}} onSell={(h:any)=>{setSelectedItem(h);setActiveModal('sell')}} baseCurrency={baseCurrency} rates={rates} convert={convert} CURRENCY_SYMBOLS={CURRENCY_SYMBOLS}/>}
-            {activeTab === 'ledger' && <LedgerView transactions={transactions} people={people} cardLogs={cardLogs} onAdd={()=>setActiveModal('add-trans')} onEdit={(t:any)=>{setSelectedItem(t);setActiveModal('edit-trans')}} currentGroupId={currentGroupId} userId={user?.uid} onDelete={(id:string)=>confirmDelete(async()=>await deleteDoc(doc(db,getCollectionPath(user!.uid,currentGroupId,'transactions'),id)), '確定刪除此筆記帳資料?')} onManageRecurring={()=>setActiveModal('manage-recurring')} onBatchAdd={()=>setActiveModal('ai-batch')} />}
+            {activeTab === 'ledger' && <LedgerView transactions={transactions} categories={categories} people={people} cardLogs={cardLogs} onAdd={()=>setActiveModal('add-trans')} onEdit={(t:any)=>{setSelectedItem(t);setActiveModal('edit-trans')}} currentGroupId={currentGroupId} userId={user?.uid} onDelete={(id:string)=>confirmDelete(async()=>await deleteDoc(doc(db,getCollectionPath(user!.uid,currentGroupId,'transactions'),id)), '確定刪除此筆記帳資料?')} onManageRecurring={()=>setActiveModal('manage-recurring')} onBatchAdd={()=>setActiveModal('ai-batch')} />}
             {activeTab === 'cash' && <CashView accounts={calculatedAccounts} creditCards={creditCards} onTransfer={()=>setActiveModal('transfer')} onAddAccount={()=>setActiveModal('add-account')} onManageAccount={()=>setActiveModal('manage-accounts')} onAddCard={()=>setActiveModal('add-card')} onManageCard={()=>setActiveModal('manage-cards')} onViewAccount={(acc:any)=>{setSelectedItem(acc);setActiveModal('view-bank')}} onViewCard={(card:any)=>{setSelectedItem(card);setActiveModal('view-card')}}/>}
          </div>
       </main>
@@ -347,7 +361,7 @@ export default function App() {
       </nav>
 
       {/* Modals */}
-      {activeModal === 'settings' && <SettingsModal onClose={()=>setActiveModal(null)} onExport={exportData} onImport={handleImport} onGroupJoin={handleGroupJoin} currentGroupId={currentGroupId} categories={categories} onAddCategory={(name:string,type:string)=>addDoc(collection(db,getCollectionPath(user!.uid,currentGroupId,'categories')),{name,type})} onDeleteCategory={(id:string)=>confirmDelete(async()=>await deleteDoc(doc(db,getCollectionPath(user!.uid,currentGroupId,'categories'),id)), '確定刪除此分類? (需二次確認)')}/>}
+      {activeModal === 'settings' && <SettingsModal onClose={()=>setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} currentGroupId={currentGroupId} categories={categories} onAddCategory={(name:string,type:string, budget:number)=>addDoc(collection(db,getCollectionPath(user!.uid,currentGroupId,'categories')),{name,type, budgetLimit: budget||0})} onDeleteCategory={(id:string)=>confirmDelete(async()=>await deleteDoc(doc(db,getCollectionPath(user!.uid,currentGroupId,'categories'),id)), '確定刪除此分類? (需二次確認)')}/>}
       {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={()=>{setActiveModal(null);setSelectedItem(null)}} editData={selectedItem} />}
       
       {activeModal === 'ai-batch' && <AIBatchImportModal userId={user?.uid} groupId={currentGroupId} categories={categories} existingTransactions={transactions} accounts={accounts} creditCards={creditCards} existingBankLogs={bankLogs} existingCardLogs={cardLogs} people={people} onClose={()=>setActiveModal(null)} />}

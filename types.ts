@@ -75,6 +75,7 @@ export interface Category {
   id: string;
   name: string;
   type: 'expense' | 'income';
+  budgetLimit?: number; // Added for Budgeting feature
 }
 
 export interface RecurringRule {
