@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal } from 'lucide-react';
 import { AssetHolding, Transaction, BankAccount, CreditCardInfo, Person, BankTransaction, CreditCardLog, Platform } from '../types';
@@ -54,27 +55,40 @@ export const LedgerView = ({ transactions, categories, people, onAdd, onBatchAdd
 
    const getDateRange = () => {
       const now = new Date();
-      const start = new Date(now);
-      const end = new Date(now);
+      let start = new Date();
+      let end = new Date();
       start.setHours(0,0,0,0);
       end.setHours(23,59,59,999);
 
-      if (timeRange === 'week') {
-         const day = start.getDay() || 7;
-         start.setDate(start.getDate() - day + 1);
-      } else if (timeRange === 'month') {
-         start.setDate(1);
-         end.setMonth(end.getMonth() + 1);
-         end.setDate(0);
-      } else if (timeRange === 'lastMonth') {
-         start.setMonth(start.getMonth() - 1);
-         start.setDate(1);
-         end.setDate(0);
-      } else if (timeRange === 'year') {
-         start.setMonth(0, 1);
-      } else if (timeRange === 'custom') {
-         if(customStart) start.setTime(new Date(customStart).getTime());
-         if(customEnd) end.setTime(new Date(customEnd + 'T23:59:59').getTime());
+      switch(timeRange) {
+         case 'week': {
+             const day = now.getDay();
+             const diff = now.getDate() - day + (day === 0 ? -6 : 1); 
+             start.setDate(diff);
+             end.setDate(diff + 6);
+             break;
+         }
+         case 'month': {
+             start.setDate(1);
+             end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+             break;
+         }
+         case 'lastMonth': {
+             start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+             end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+             break;
+         }
+         case 'year': {
+             start = new Date(now.getFullYear(), 0, 1);
+             end = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
+             break;
+         }
+         case 'custom': {
+             if(customStart) start = new Date(customStart);
+             if(customEnd) end = new Date(customEnd);
+             end.setHours(23,59,59,999);
+             break;
+         }
       }
       return { start, end };
    };
@@ -83,13 +97,13 @@ export const LedgerView = ({ transactions, categories, people, onAdd, onBatchAdd
 
    const filtered = transactions.filter((t: any) => {
        const matchSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase()) || t.category.includes(searchTerm);
-       const d = t.date?.seconds ? new Date(t.date.seconds*1000) : new Date(0);
        
-       // Apply date filter to Stats, but also List if not searching (optional, but good for consistency)
-       // Currently applying date filter only to Stats as per user request for "Pie Chart"
        if (viewMode === 'stats') {
+           if(!t.date?.seconds) return false;
+           const d = new Date(t.date.seconds * 1000);
            return d >= filterStart && d <= filterEnd;
        }
+
        return matchSearch;
    }).sort((a:any,b:any) => (b.date?.seconds||0) - (a.date?.seconds||0));
 

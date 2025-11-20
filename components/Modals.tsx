@@ -614,22 +614,23 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
 
    const checkDuplicate = (item: any) => {
        const itemDateStr = item.date;
+       const isSameDate = (ts: any, dateStr: string) => {
+           if(!ts) return false;
+           const d = new Date(ts.seconds * 1000).toISOString().split('T')[0];
+           return d === dateStr;
+       };
+
        if(target === 'ledger') {
-           return existingTransactions.some((t:any) => {
-               const d = new Date(t.date.seconds*1000).toISOString().split('T')[0];
-               return d === itemDateStr && Math.abs(t.totalAmount - item.amount) < 1;
-           });
+           return existingTransactions.some((t:any) => isSameDate(t.date, itemDateStr) && Math.abs(t.totalAmount - item.amount) < 1);
        } else if (target === 'bank') {
            return existingBankLogs.some((l:any) => {
                if(l.accountId !== targetId) return false;
-               const d = new Date(l.date.seconds*1000).toISOString().split('T')[0];
-               return d === itemDateStr && Math.abs(l.amount - item.amount) < 1;
+               return isSameDate(l.date, itemDateStr) && Math.abs(l.amount - item.amount) < 1;
            });
        } else if (target === 'card') {
            return existingCardLogs.some((l:any) => {
                if(l.cardId !== targetId) return false;
-               const d = new Date(l.date.seconds*1000).toISOString().split('T')[0];
-               return d === itemDateStr && Math.abs(l.amount - item.amount) < 1;
+               return isSameDate(l.date, itemDateStr) && Math.abs(l.amount - item.amount) < 1;
            });
        }
        return false;
@@ -643,7 +644,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
            if (target === 'ledger') {
                prompt = `Parse the input into a JSON array of transactions. Fields: date (YYYY-MM-DD, default to today), description, amount (number), type (expense/income), category (choose closest from: ${categories.map((c:any)=>c.name).join(',')}).`;
            } else if (target === 'bank') {
-               prompt = `Parse the input into a JSON array of bank logs. Fields: date (YYYY-MM-DD), description, amount (number), type (in/out). Note: 'in' is deposit, 'out' is withdrawal.`;
+               prompt = `Parse the input into a JSON array of bank logs. Fields: date (YYYY-MM-DD), description, amount (number), type (in/out). Note: 'in' is deposit/income, 'out' is withdrawal/expense. Infer type from context if possible.`;
            } else if (target === 'card') {
                prompt = `Parse the input into a JSON array of credit card logs. Fields: date (YYYY-MM-DD), description, amount (number). Note: Amount should be positive number.`;
            }
@@ -652,12 +653,20 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
            const json = JSON.parse(res.replace(/```json/g, '').replace(/```/g, ''));
            
            const items = Array.isArray(json) ? json : [json];
-           const processed = items.map((it:any) => ({
-               ...it,
-               id: Math.random().toString(36).substr(2,9),
-               selected: !checkDuplicate(it),
-               isDuplicate: checkDuplicate(it)
-           }));
+           const processed = items.map((it:any) => {
+               // Ensure amount is number
+               it.amount = parseFloat(it.amount) || 0;
+               // Ensure date is string
+               if(!it.date) it.date = new Date().toISOString().split('T')[0];
+               
+               const isDup = checkDuplicate(it);
+               return {
+                   ...it,
+                   id: Math.random().toString(36).substr(2,9),
+                   selected: !isDup,
+                   isDuplicate: isDup
+               };
+           });
            setParsedItems(processed);
        } catch (e) {
            console.error(e);
