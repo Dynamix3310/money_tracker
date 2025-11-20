@@ -2,9 +2,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
-import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles } from 'lucide-react';
+import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock } from 'lucide-react';
 import { auth, db, getCollectionPath, getUserProfilePath } from './services/firebase';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
+import { ADMIN_EMAILS } from './services/gemini';
 import { ExpensePieChart, CashFlowBarChart, NetWorthAreaChart } from './components/Charts';
 import { SettingsModal, SellAssetModal, AddTransactionModal, AddAssetModal, AddAccountModal, AddCardModal, BankDetailModal, AIAssistantModal, CardDetailModal, TransferModal, EditAssetModal, ConfirmActionModal, AddPlatformModal, ManagePlatformCashModal, ManageListModal, AddRecurringModal, ManageRecurringModal, AIBatchImportModal } from './components/Modals';
 import { PortfolioView, LedgerView, CashView } from './components/Views';
@@ -274,6 +275,32 @@ export default function App() {
 
   if (!user) {
       return <AuthScreen />;
+  }
+
+  // ACCESS CONTROL BLOCK
+  // If the logged-in user is NOT an admin, block the entire application view.
+  // This prevents usage of Firebase (Data), Finnhub (Stocks), and Gemini (AI).
+  if (user.email && !ADMIN_EMAILS.includes(user.email)) {
+      return (
+         <div className="h-screen flex flex-col items-center justify-center bg-slate-50 p-4">
+            <div className="bg-white p-8 rounded-2xl shadow-xl text-center max-w-md w-full animate-in zoom-in-95">
+               <div className="mx-auto bg-red-100 p-4 rounded-full w-fit mb-4 text-red-600">
+                  <Lock size={32} />
+               </div>
+               <h2 className="text-2xl font-bold text-slate-800 mb-2">權限不足</h2>
+               <p className="text-slate-500 mb-6 text-sm leading-relaxed">
+                  抱歉，此應用程式目前僅限管理員使用。<br/>
+                  您的帳號 <span className="font-mono font-bold text-slate-700 bg-slate-100 px-1 rounded">{user.email}</span> 不在允許名單中。
+               </p>
+               <button 
+                  onClick={() => auth.signOut()}
+                  className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-colors"
+               >
+                  登出帳號
+               </button>
+            </div>
+         </div>
+      );
   }
 
   return (

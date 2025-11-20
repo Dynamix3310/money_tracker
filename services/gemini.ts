@@ -15,9 +15,10 @@ declare var process: {
 // 請在此處填入允許使用系統 API Key 的使用者 Email
 // 只有在名單內的 Email 登入後，才能使用環境變數中的 VITE_GEMINI_API_KEY
 // 若不在名單內，系統會要求使用者在「設定」中輸入自己的 Key
-const ADMIN_EMAILS = [
+// Export this list so App.tsx and api.ts can use it for access control
+export const ADMIN_EMAILS = [
     'fatibrother@gmail.com', 
-    'lazycancerguy11@gmail.com', // <--- 請將您的 Email 加在這裡
+    'lazycancerguy11@gmail.com', 
     'jennyliao26217167@gmail.com'
 ]; 
 

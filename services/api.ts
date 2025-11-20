@@ -1,4 +1,7 @@
 
+import { getAuth } from "firebase/auth";
+import { ADMIN_EMAILS } from "./gemini";
+
 export async function fetchExchangeRates(base: string = 'TWD') {
   try {
     // using a free open API for rates
@@ -40,9 +43,25 @@ export async function fetchCryptoPrice(symbol: string) {
 
 export async function fetchStockPrice(symbol: string, apiKey?: string) {
   try {
-    // Using Finnhub API for stock prices.
-    // Note: Public keys are often rate-limited.
-    const token = apiKey || 'd4etl81r01ql649g382gd4etl81r01ql649g3830'; 
+    // Determine API Key to use
+    let token = apiKey;
+
+    if (!token) {
+        // If no user key provided, check if user is admin
+        const auth = getAuth();
+        const user = auth.currentUser;
+        const isAdmin = user?.email && ADMIN_EMAILS.includes(user.email);
+
+        if (isAdmin) {
+            // Using System Finnhub API Key for admins
+            // Note: Public keys are often rate-limited.
+            token = 'd4etl81r01ql649g382gd4etl81r01ql649g3830'; 
+        }
+    }
+
+    // If still no token (User not admin and no custom key), return null
+    if (!token) return null;
+
     const response = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol.toUpperCase()}&token=${token}`);
     const data = await response.json();
     
