@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
 import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock } from 'lucide-react';
@@ -59,6 +60,12 @@ export default function App() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
 
+  // Ref for background process to access latest holdings without stale closures
+  const holdingsRef = useRef<AssetHolding[]>([]);
+  useEffect(() => {
+    holdingsRef.current = holdings;
+  }, [holdings]);
+
   // Safe Check for Firebase Auth
   useEffect(() => {
     if (!auth) {
@@ -100,11 +107,18 @@ export default function App() {
   // Auto Refresh Stock Prices (Every 15 mins)
   useEffect(() => {
     if (!user) return;
+    
     const interval = setInterval(() => {
       updateAssetPrices(false);
     }, 15 * 60 * 1000);
-    setTimeout(() => updateAssetPrices(false), 3000);
-    return () => clearInterval(interval);
+    
+    // Initial fetch after a short delay to allow data to load
+    const initialTimer = setTimeout(() => updateAssetPrices(false), 3000);
+    
+    return () => {
+        clearInterval(interval);
+        clearTimeout(initialTimer);
+    };
   }, [user]);
 
   // Check Recurring Rules
@@ -196,11 +210,16 @@ export default function App() {
   }, [holdings, platforms, calculatedAccounts, baseCurrency, rates]);
 
   const updateAssetPrices = async (showFeedback = true) => {
-     if(!holdings.length || !user) return;
+     // Use ref to ensure background process has latest data without requiring interval reset
+     const currentHoldings = holdingsRef.current;
+     
+     if(!currentHoldings.length || !user) return;
+     
      let updated = 0;
      let errors = [];
      const currentKey = localStorage.getItem('finnhub_key') || ''; 
-     for(const h of holdings) {
+     
+     for(const h of currentHoldings) {
         let price = null;
         if(h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
         else { price = await fetchStockPrice(h.symbol, currentKey); if(!price) errors.push(h.symbol); }

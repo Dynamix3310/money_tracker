@@ -485,7 +485,7 @@ export const CardDetailModal = ({ userId, card, cardLogs, transactions, allCardL
    const viewLogs = cardLogs.filter((l:any) => {
       if(!l.date?.seconds) return false;
       const d = new Date((l.date.seconds as number)*1000);
-      return d >= currentCycleStart && d <= currentCycleEnd;
+      return d.getTime() >= currentCycleStart.getTime() && d.getTime() <= currentCycleEnd.getTime();
    }).sort((a:any,b:any) => ((b.date?.seconds as number)||0) - ((a.date?.seconds as number)||0));
    const handleSaveLog = async () => {
       if(!amt || !desc) return;
@@ -517,14 +517,21 @@ export const ManagePlatformCashModal = ({ platform, userId, onClose }: any) => {
 }
 
 export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
-   const [symbol, setSymbol] = useState(''); const [qty, setQty] = useState<string>(''); const [cost, setCost] = useState<string>(''); const [platformId, setPlatformId] = useState(platforms[0]?.id || ''); const [type, setType] = useState<'stock'|'crypto'>('stock'); const [deductCash, setDeductCash] = useState(true);
-   const handleSave = async () => { if(!symbol || !qty || !cost || !platformId) return; const totalCost = parseFloat(cost as string) * parseFloat(qty as string); const platform = platforms.find((p:any) => p.id === platformId); await addDoc(collection(db, getCollectionPath(userId, null, 'holdings')), { symbol: symbol.toUpperCase(), quantity: parseFloat(qty as string), avgCost: parseFloat(cost as string), currentPrice: parseFloat(cost as string), currency: platform?.currency || 'USD', type, platformId }); if(deductCash && platform) { await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platformId), { balance: platform.balance - totalCost }); } onClose(); };
+   const [symbol, setSymbol] = useState(''); const [qty, setQty] = useState<string>(''); const [cost, setCost] = useState<string>(''); const [platformId, setPlatformId] = useState(platforms[0]?.id || ''); const [type, setType] = useState<'stock'|'crypto'>(editData?.type || 'stock'); const [deductCash, setDeductCash] = useState(true);
+   const handleSave = async () => { 
+       if(!symbol || !qty || !cost || !platformId) return; 
+       const qtyNum = parseFloat(String(qty));
+       const costNum = parseFloat(String(cost));
+       const totalCost = costNum * qtyNum; 
+       const platform = platforms.find((p:any) => p.id === platformId); 
+       await addDoc(collection(db, getCollectionPath(userId, null, 'holdings')), { symbol: symbol.toUpperCase(), quantity: qtyNum, avgCost: costNum, currentPrice: costNum, currency: platform?.currency || 'USD', type, platformId }); 
+       if(deductCash && platform) { await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platformId), { balance: (platform.balance as number) - totalCost }); } onClose(); };
    return ( <div className={styles.overlay}><div className={styles.content}> <h3 className="font-bold text-xl mb-4">新增資產</h3> <div className="space-y-4"> <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={()=>setType('stock')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='stock'?'bg-white shadow text-blue-600':'text-slate-400'}`}>股票</button><button onClick={()=>setType('crypto')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='crypto'?'bg-white shadow text-orange-600':'text-slate-400'}`}>加密貨幣</button></div> <div> <label className={styles.label}>選擇平台</label> <select className={styles.input} value={platformId} onChange={e=>setPlatformId(e.target.value)}> {platforms.map((p:any) => <option key={p.id} value={p.id}>{p.name} ({p.currency})</option>)} </select> </div> {platformId && <div className="flex items-center gap-2 px-2"> <input type="checkbox" checked={deductCash} onChange={e=>setDeductCash(e.target.checked)} id="dc" className="w-4 h-4 text-indigo-600 rounded"/> <label htmlFor="dc" className="text-sm font-bold text-slate-600">從平台餘額扣款</label> </div>} <div><label className={styles.label}>代號</label><input placeholder="例如: AAPL, 2330.TW, 7203.T (日股請加 .T)" className={styles.input} value={symbol} onChange={e=>setSymbol(e.target.value)} /></div> <div className="grid grid-cols-2 gap-3"> <div><label className={styles.label}>數量</label><input type="number" className={styles.input} value={qty} onChange={e=>setQty(e.target.value)} /></div> <div><label className={styles.label}>平均成本 (單價)</label><input type="number" className={styles.input} value={cost} onChange={e=>setCost(e.target.value)} /></div> </div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div> </div> </div></div> )
 }
 
 export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
-   const [qty, setQty] = useState(holding.quantity.toString()); const [cost, setCost] = useState(holding.avgCost.toString());
-   const handleSave = async () => { await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), { quantity: parseFloat(qty), avgCost: parseFloat(cost) }); onClose(); };
+   const [qty, setQty] = useState(String(holding.quantity)); const [cost, setCost] = useState(String(holding.avgCost));
+   const handleSave = async () => { await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), { quantity: parseFloat(String(qty)), avgCost: parseFloat(String(cost)) }); onClose(); };
    return ( <div className={styles.overlay}><div className={styles.content}> <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">編輯 {holding.symbol}</h3><button onClick={onDelete} className="text-red-500 p-2 bg-red-50 rounded-lg"><Trash2 size={18}/></button></div> <div className="space-y-4"> <div><label className={styles.label}>數量</label><input type="number" className={styles.input} value={qty} onChange={e=>setQty(e.target.value)} /></div> <div><label className={styles.label}>平均成本</label><input type="number" className={styles.input} value={cost} onChange={e=>setCost(e.target.value)} /></div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>更新</button></div> </div> </div></div> )
 }
 
