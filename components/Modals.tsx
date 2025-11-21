@@ -484,9 +484,9 @@ export const CardDetailModal = ({ userId, card, cardLogs, transactions, allCardL
    const availableTrans = transactions.filter((t:any) => !globalUsedIds.includes(t.id)).slice(0, 30);
    const viewLogs = cardLogs.filter((l:any) => {
       if(!l.date?.seconds) return false;
-      const d = new Date((l.date.seconds as number)*1000);
+      const d = new Date(Number(l.date.seconds) * 1000);
       return d.getTime() >= currentCycleStart.getTime() && d.getTime() <= currentCycleEnd.getTime();
-   }).sort((a:any,b:any) => ((b.date?.seconds as number)||0) - ((a.date?.seconds as number)||0));
+   }).sort((a:any,b:any) => (Number(b.date?.seconds)||0) - (Number(a.date?.seconds)||0));
    const handleSaveLog = async () => {
       if(!amt || !desc) return;
       const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));
@@ -517,7 +517,7 @@ export const ManagePlatformCashModal = ({ platform, userId, onClose }: any) => {
 }
 
 export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
-   const [symbol, setSymbol] = useState(''); const [qty, setQty] = useState<string>(''); const [cost, setCost] = useState<string>(''); const [platformId, setPlatformId] = useState(platforms[0]?.id || ''); const [type, setType] = useState<'stock'|'crypto'>(editData?.type || 'stock'); const [deductCash, setDeductCash] = useState(true);
+   const [symbol, setSymbol] = useState(''); const [qty, setQty] = useState<string>(''); const [cost, setCost] = useState<string>(''); const [platformId, setPlatformId] = useState(platforms[0]?.id || ''); const [type, setType] = useState<'stock'|'crypto'>('stock'); const [deductCash, setDeductCash] = useState(true);
    const handleSave = async () => { 
        if(!symbol || !qty || !cost || !platformId) return; 
        const qtyNum = parseFloat(String(qty));
@@ -589,8 +589,8 @@ export const BankDetailModal = ({ userId, account, logs, onClose, onImport }: an
       const a = document.createElement('a'); a.href = url; a.download = `${account.name}_logs.csv`; a.click();
    };
    
-   const groupedLogs = logs.sort((a:any,b:any)=>((b.date?.seconds as number)||0)-((a.date?.seconds as number)||0)).reduce((acc:any, log:any) => {
-      const d = log.date?.seconds ? new Date((log.date.seconds as number)*1000) : new Date();
+   const groupedLogs = logs.sort((a:any,b:any)=>(Number(b.date?.seconds)||0)-(Number(a.date?.seconds)||0)).reduce((acc:any, log:any) => {
+      const d = log.date?.seconds ? new Date(Number(log.date.seconds) * 1000) : new Date();
       const key = `${d.getFullYear()}年${d.getMonth()+1}月`;
       if(!acc[key]) acc[key] = [];
       acc[key].push(log);
@@ -632,7 +632,7 @@ export const BankDetailModal = ({ userId, account, logs, onClose, onImport }: an
                   <div className="bg-white">
                       {groupedLogs[month].map((l:any) => (
                          <div key={l.id} className="flex justify-between items-center p-3 border-b last:border-0 border-slate-50 hover:bg-slate-50 transition-colors"> 
-                            <div> <div className="font-bold text-sm text-slate-700">{l.description}</div> <div className="text-xs text-slate-400">{l.date?.seconds?new Date((l.date.seconds as number)*1000).toLocaleDateString():''}</div> </div> 
+                            <div> <div className="font-bold text-sm text-slate-700">{l.description}</div> <div className="text-xs text-slate-400">{l.date?.seconds?new Date(Number(l.date.seconds) * 1000).toLocaleDateString():''}</div> </div> 
                             <div className="flex items-center gap-3"> <div className={`font-bold ${l.type==='in'?'text-emerald-600':'text-slate-800'}`}>{l.type==='in'?'+':''}{l.amount.toLocaleString()}</div> <button onClick={()=>handleDelete(l.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button> </div> 
                          </div>
                       ))}
@@ -654,7 +654,7 @@ export const AIAssistantModal = ({ onClose, contextData }: any) => {
 }
 
 export const AIBatchImportModal = ({ userId, groupId, categories, existingTransactions, accounts, creditCards, existingBankLogs, existingCardLogs, people, onClose, initialConfig }: any) => {
-   const [mode, setMode] = useState<'text'|'image'>('text');
+   const [mode, setMode] = useState<'text'|'image'|'file'>('text');
    const [target, setTarget] = useState<'ledger'|'bank'|'card'>('ledger');
    const [targetId, setTargetId] = useState('');
    
@@ -699,19 +699,38 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
    };
 
    const handleAnalyze = async () => {
-       if ((mode === 'text' && !textInput) || (mode === 'image' && !imagePreview)) return;
+       if ((mode === 'text' && !textInput) || (mode === 'image' && !imagePreview) || (mode === 'file' && !textInput)) return;
        setLoading(true);
        try {
            let prompt = "";
+           const commonInstruction = `Parse the input into a JSON array. Infer type (expense/income) and category (from: ${categories.map((c:any)=>c.name).join(',')}) based on description.`;
+           
+           // Special handling for CSV/File inputs which might be Taiwan Cloud Invoices
+           const isCSV = mode === 'file' || (mode === 'text' && textInput.includes(','));
+
            if (target === 'ledger') {
-               prompt = `Parse the input into a JSON array of transactions. Fields: date (YYYY-MM-DD, default to today), description, amount (number), type (expense/income), category (choose closest from: ${categories.map((c:any)=>c.name).join(',')}).`;
+               if (isCSV) {
+                   prompt = `Analyze the following CSV/Text data. It is likely Taiwan Cloud Invoice (電子發票) or accounting records. 
+                   Columns often include "交易日期" (Date), "賣方名稱" (Seller), "金額" (Amount), "品名" (Item).
+                   Ignore header rows.
+                   Extract and Map to JSON array:
+                   - description: Seller Name or Item Name
+                   - amount: Number (remove currency symbols)
+                   - date: YYYY-MM-DD
+                   - type: 'expense' (default) or 'income' (if strictly implies income)
+                   - category: Choose closest match from [${categories.map((c:any)=>c.name).join(', ')}] based on seller/item. (e.g., 7-11 -> 飲食/Daily, Uber -> 交通)
+                   `;
+               } else {
+                   prompt = `Parse the input into a JSON array of transactions. Fields: date (YYYY-MM-DD, default to today), description, amount (number), type (expense/income), category (choose closest from: ${categories.map((c:any)=>c.name).join(',')}).`;
+               }
            } else if (target === 'bank') {
                prompt = `Parse the input into a JSON array of bank logs. Fields: date (YYYY-MM-DD), description, amount (number), type (in/out). Note: 'in' is deposit/income, 'out' is withdrawal/expense. Infer type from context if possible.`;
            } else if (target === 'card') {
                prompt = `Parse the input into a JSON array of credit card logs. Fields: date (YYYY-MM-DD), description, amount (number). Note: Amount should be positive number.`;
            }
 
-           const res = await callGemini(prompt, mode === 'image' ? imagePreview! : textInput);
+           const contentToAnalyze = mode === 'image' ? imagePreview! : textInput;
+           const res = await callGemini(prompt, contentToAnalyze);
            const json = JSON.parse(res.replace(/```json/g, '').replace(/```/g, ''));
            
            const items = Array.isArray(json) ? json : [json];
@@ -801,6 +820,19 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
        }
    };
 
+   const handleFileChange = (e: any) => {
+       const file = e.target.files?.[0];
+       if (file) {
+           const reader = new FileReader();
+           reader.onload = (event) => {
+               if (event.target?.result) {
+                   setTextInput(event.target.result as string);
+               }
+           };
+           reader.readAsText(file);
+       }
+   };
+
    return (
        <div className={styles.overlay}>
            <div className={`${styles.content} max-w-2xl`}>
@@ -835,18 +867,39 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                            </div>
                        </div>
                        <div className="flex bg-slate-100 p-1 rounded-xl">
-                           <button onClick={()=>setMode('text')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode==='text'?'bg-white shadow text-indigo-600':'text-slate-400'}`}><FileText size={16}/> 文字輸入</button>
-                           <button onClick={()=>setMode('image')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode==='image'?'bg-white shadow text-indigo-600':'text-slate-400'}`}><ImageIcon size={16}/> 圖片上傳</button>
+                           <button onClick={()=>setMode('text')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode==='text'?'bg-white shadow text-indigo-600':'text-slate-400'}`}><FileText size={16}/> 文字貼上</button>
+                           <button onClick={()=>setMode('file')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode==='file'?'bg-white shadow text-indigo-600':'text-slate-400'}`}><FileSpreadsheet size={16}/> CSV/檔案</button>
+                           <button onClick={()=>setMode('image')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode==='image'?'bg-white shadow text-indigo-600':'text-slate-400'}`}><ImageIcon size={16}/> 圖片掃描</button>
                        </div>
-                       {mode === 'text' ? (
+                       
+                       {mode === 'text' && (
                            <textarea className="w-full h-40 p-3 border rounded-xl text-sm" placeholder={`貼上文字內容...\n例如: 1/15 午餐 120\n1/15 計程車 250`} value={textInput} onChange={e=>setTextInput(e.target.value)}></textarea>
-                       ) : (
+                       )}
+                       
+                       {mode === 'file' && (
+                           <div className="border-2 border-dashed border-indigo-200 rounded-xl p-8 flex flex-col items-center justify-center bg-indigo-50/50 relative hover:bg-indigo-50 transition-colors">
+                               <FileSpreadsheet size={48} className="text-indigo-400 mb-3"/>
+                               <div className="text-sm font-bold text-indigo-600 mb-1">上傳 CSV 或純文字檔</div>
+                               <div className="text-xs text-slate-400 mb-4">支援台灣雲端發票匯出格式</div>
+                               {textInput ? (
+                                   <div className="w-full bg-white p-3 rounded border text-xs text-slate-600 max-h-32 overflow-hidden relative">
+                                       <div className="absolute inset-0 bg-gradient-to-b from-transparent to-white/90"></div>
+                                       {textInput.slice(0, 200)}...
+                                   </div>
+                               ) : (
+                                   <span className="text-xs bg-white px-3 py-1 rounded-full border shadow-sm text-slate-500">選擇檔案...</span>
+                               )}
+                               <input type="file" accept=".csv,.txt" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileChange} />
+                           </div>
+                       )}
+
+                       {mode === 'image' && (
                            <div className="border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center bg-slate-50 relative">
                                {imagePreview ? <img src={imagePreview} className="max-h-40 rounded object-contain" /> : <div className="text-slate-400 text-center"><Camera size={32} className="mx-auto mb-2"/><span className="text-xs">點擊上傳照片</span></div>}
                                <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleImageChange} />
                            </div>
                        )}
-                       <button onClick={handleAnalyze} disabled={loading} className={styles.btnPrimary}>{loading ? <Loader2 className="animate-spin"/> : '開始分析'}</button>
+                       <button onClick={handleAnalyze} disabled={loading} className={styles.btnPrimary}>{loading ? <Loader2 className="animate-spin"/> : 'AI 智慧分析'}</button>
                    </div>
                ) : (
                    <div className="space-y-4">

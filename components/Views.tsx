@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal } from 'lucide-react';
+import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal, FileSpreadsheet } from 'lucide-react';
 import { AssetHolding, Transaction, BankAccount, CreditCardInfo, Person, BankTransaction, CreditCardLog, Platform } from '../types';
 import { ExpensePieChart } from './Charts';
 
@@ -175,7 +175,7 @@ export const LedgerView = ({ transactions, categories, people, onAdd, onBatchAdd
                <div className="flex items-center gap-2"><div className="bg-indigo-100 text-indigo-600 p-1.5 rounded-lg"><Users size={16}/></div><div><h3 className="font-bold text-sm">{currentGroupId===userId?'個人帳本':'群組帳本'}</h3></div></div>
                <div className="flex gap-2">
                    <button onClick={onManageRecurring} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors" title="固定收支"><Repeat size={16}/></button>
-                   <button onClick={onBatchAdd} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors"><Sparkles size={16}/></button>
+                   <button onClick={onBatchAdd} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors flex items-center gap-1" title="匯入發票/CSV"><FileSpreadsheet size={16}/></button>
                    <div className="flex bg-slate-100 p-1 rounded-lg">
                        <button onClick={()=>setViewMode('list')} className={`p-1.5 rounded ${viewMode==='list'?'bg-white shadow text-slate-800':'text-slate-400'}`}><Calendar size={14}/></button>
                        <button onClick={()=>setViewMode('debts')} className={`p-1.5 rounded ${viewMode==='debts'?'bg-white shadow text-slate-800':'text-slate-400'}`}><Receipt size={14}/></button>
