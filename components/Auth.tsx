@@ -26,42 +26,119 @@ export const AuthScreen = () => {
         const userCred = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCred.user;
         
-        // 1. Create Group Metadata
-        // We create a document in the standard path we defined
-        const groupRef = await addDoc(collection(db, 'artifacts/wealthflow-stable-restore/groups'), {
-            ownerId: user.uid,
-            createdAt: new Date(),
-            name: `${name || 'User'}的帳本`
-        });
-        const groupId = groupRef.id;
+        // Use transaction to enforce user limit and ensure atomicity
+        await import('firebase/firestore').then(async ({ runTransaction, doc }) => {
+            await runTransaction(db, async (transaction) => {
+                // 1. Check User Limit
+                const statsRef = doc(db, 'artifacts/wealthflow-stable-restore/metadata/stats');
+                const statsSnap = await transaction.get(statsRef);
+                
+                let currentCount = 0;
+                if (statsSnap.exists()) {
+                    currentCount = statsSnap.data().userCount || 0;
+                }
 
-        // 2. Create User Profile linked to that group
-        // Using the path from firebase helper
-        await setDoc(doc(db, getUserProfilePath(user.uid)), {
-            uid: user.uid,
-            email: user.email,
-            name: name || 'User',
-            currentGroupId: groupId
+                if (currentCount >= 20) {
+                    throw new Error("Registration limit reached (Max 20 users).");
+                }
+
+                // 2. Prepare Data
+                const newGroupId = doc(collection(db, 'artifacts/wealthflow-stable-restore/groups')).id;
+                const groupRef = doc(db, 'artifacts/wealthflow-stable-restore/groups', newGroupId);
+                const userProfileRef = doc(db, getUserProfilePath(user.uid));
+                
+                // 3. Writes
+                // Increment counter
+                transaction.set(statsRef, { userCount: currentCount + 1 }, { merge: true });
+
+                // Create Group with members array for security rules
+                transaction.set(groupRef, {
+                    ownerId: user.uid,
+                    createdAt: new Date(),
+                    name: `${name || 'User'}的帳本`,
+                    members: [user.uid] // Critical for security rules
+                });
+
+                // Create User Profile
+                transaction.set(userProfileRef, {
+                    uid: user.uid,
+                    email: user.email,
+                    name: name || 'User',
+                    currentGroupId: newGroupId
+                });
+
+                // Add user to People collection (subcollection needs standard add/set outside transaction or via batched writes, 
+                // but transaction is best for the core limit check. 
+                // We'll do the subcollections AFTER the transaction to avoid complexity limit, 
+                // or we can do them here if we construct paths manually. 
+                // For simplicity and safety, let's keep the critical limit check in transaction 
+                // and do the rest after, OR include them if we can get refs.)
+                
+                // Actually, for "members" security to work immediately, the group doc MUST be created here.
+                // The subcollections (people, categories) can be created after.
+            });
+
+            // 4. Post-Transaction Setup (Subcollections)
+            // We need to retrieve the groupId again or pass it out. 
+            // Since we generated the ID above, we can't easily get it out of the transaction closure without a ref var.
+            // Let's refactor slightly to ensure we have the ID.
         });
 
-        // 3. Add user to the People collection of that group
-        const peopleCol = collection(db, getCollectionPath(user.uid, groupId, 'people'));
+        // Refactored Transaction Block to ensure we have groupId
+        const newGroupId = doc(collection(db, 'artifacts/wealthflow-stable-restore/groups')).id;
+        
+        await import('firebase/firestore').then(async ({ runTransaction, doc }) => {
+             await runTransaction(db, async (transaction) => {
+                const statsRef = doc(db, 'artifacts/wealthflow-stable-restore/metadata/stats');
+                const statsSnap = await transaction.get(statsRef);
+                const currentCount = statsSnap.exists() ? (statsSnap.data().userCount || 0) : 0;
+
+                if (currentCount >= 20) throw new Error("Registration limit reached (Max 20 users).");
+
+                transaction.set(statsRef, { userCount: currentCount + 1 }, { merge: true });
+                
+                transaction.set(doc(db, 'artifacts/wealthflow-stable-restore/groups', newGroupId), {
+                    ownerId: user.uid,
+                    createdAt: new Date(),
+                    name: `${name || 'User'}的帳本`,
+                    members: [user.uid]
+                });
+
+                transaction.set(doc(db, getUserProfilePath(user.uid)), {
+                    uid: user.uid,
+                    email: user.email,
+                    name: name || 'User',
+                    currentGroupId: newGroupId
+                });
+             });
+        });
+
+        // 5. Create default subcollections (People, Categories)
+        // These don't strictly need to be in the transaction for the user limit logic, 
+        // but it's good practice. For now, we do them here.
+        const peopleCol = collection(db, getCollectionPath(user.uid, newGroupId, 'people'));
         await addDoc(peopleCol, {
             name: name || '我',
             isMe: true,
             email: user.email,
-            uid: user.uid // Link person to auth uid
+            uid: user.uid
         });
         
-        // 4. Create default categories
         const cats = ['飲食','交通','購物','娛樂','居住'];
-        const catCol = collection(db, getCollectionPath(user.uid, groupId, 'categories'));
+        const catCol = collection(db, getCollectionPath(user.uid, newGroupId, 'categories'));
         for(const c of cats) await addDoc(catCol, { name: c, type: 'expense' });
         await addDoc(catCol, { name: '薪水', type: 'income' });
       }
     } catch (err: any) {
       console.error(err);
       setError(err.message || '驗證失敗，請檢查輸入');
+      // If transaction failed but auth created user, we might want to cleanup auth user?
+      // For MVP, we'll leave it. The user exists in Auth but has no profile/group, 
+      // so App.tsx will likely error or show empty state. 
+      // Ideally we should delete the auth user if DB setup fails.
+      if (!isLogin && auth.currentUser) {
+          await auth.currentUser.delete().catch(console.error);
+      }
     } finally {
       setLoading(false);
     }
