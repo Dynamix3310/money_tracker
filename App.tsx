@@ -121,6 +121,17 @@ export default function App() {
       };
    }, [user]);
 
+   // Handle URL Shortcuts
+   useEffect(() => {
+      const params = new URLSearchParams(window.location.search);
+      const action = params.get('action');
+      if (action === 'add-expense') {
+         setActiveModal('add-trans');
+         // Clean URL
+         window.history.replaceState({}, '', window.location.pathname);
+      }
+   }, []);
+
    // Check Recurring Rules
    useEffect(() => {
       if (!user || recurringRules.length === 0) return;
@@ -220,10 +231,13 @@ export default function App() {
       const currentKey = localStorage.getItem('finnhub_key') || '';
 
       for (const h of currentHoldings) {
+         // Skip if manual price is set
+         if (h.manualPrice) continue;
+
          let price = null;
          if (h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
          else { price = await fetchStockPrice(h.symbol, currentKey); if (!price) errors.push(h.symbol); }
-         if (price) { await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price }); updated++; }
+         if (price) { await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price, lastUpdated: serverTimestamp() }); updated++; }
       }
       if (showFeedback && errors.length > 0) alert(`更新完成，但部分失敗: ${errors.join(', ')}`);
       else if (showFeedback) alert(`成功更新 ${updated} 筆資產價格`);
@@ -243,13 +257,71 @@ export default function App() {
 
    const handleSellAsset = async (price: number, qty: number) => {
       if (!selectedItem || !user) return;
-      const item = selectedItem;
-      if (qty >= item.quantity) await deleteDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), item.id));
-      else await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), item.id), { quantity: item.quantity - qty });
+      const item = selectedItem as AssetHolding;
+
+      // FIFO Logic for Lots
+      let remainingQtyToSell = qty;
+      let newLots = item.lots ? [...item.lots] : [];
+
+      // Sort lots by date (oldest first)
+      newLots.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+      // If no lots exist (legacy data), create a dummy lot for the remaining balance
+      if (newLots.length === 0 && item.quantity > 0) {
+         newLots.push({
+            id: 'legacy',
+            date: new Date().toISOString(),
+            quantity: item.quantity,
+            costPerShare: item.avgCost,
+            note: 'Legacy Holding'
+         });
+      }
+
+      const updatedLots = [];
+      let realizedPnL = 0;
+
+      for (const lot of newLots) {
+         if (remainingQtyToSell <= 0) {
+            updatedLots.push(lot);
+            continue;
+         }
+
+         if (lot.quantity <= remainingQtyToSell) {
+            // Sell entire lot
+            realizedPnL += (price - lot.costPerShare) * lot.quantity;
+            remainingQtyToSell -= lot.quantity;
+            // Lot is consumed, don't push to updatedLots
+         } else {
+            // Partial sell
+            realizedPnL += (price - lot.costPerShare) * remainingQtyToSell;
+            updatedLots.push({ ...lot, quantity: lot.quantity - remainingQtyToSell });
+            remainingQtyToSell = 0;
+         }
+      }
+
+      if (qty >= item.quantity) {
+         await deleteDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), item.id));
+      } else {
+         // Recalculate avg cost based on remaining lots
+         const totalCost = updatedLots.reduce((acc, l) => acc + (l.quantity * l.costPerShare), 0);
+         const totalQty = updatedLots.reduce((acc, l) => acc + l.quantity, 0);
+         const newAvgCost = totalQty > 0 ? totalCost / totalQty : 0;
+
+         await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), item.id), {
+            quantity: item.quantity - qty,
+            lots: updatedLots,
+            avgCost: newAvgCost
+         });
+      }
 
       const totalReturn = price * qty;
       const platform = platforms.find(p => p.id === item.platformId);
       if (platform) await updateDoc(doc(db, getCollectionPath(user.uid, null, 'platforms'), platform.id), { balance: platform.balance + totalReturn });
+
+      // Record Realized PnL (Optional: Add to transactions or history)
+      // For now just alert or log
+      console.log(`Realized PnL: ${realizedPnL}`);
+
       setSelectedItem(null); setActiveModal(null);
    };
 
