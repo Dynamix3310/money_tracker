@@ -8,9 +8,6 @@ export interface AssetHolding {
   currentPrice: number;
   currency: string;
   type: 'stock' | 'crypto';
-  lots?: { id: string, date: any, quantity: number, costPerShare: number, note?: string }[];
-  manualPrice?: number;
-  lastUpdated?: any;
 }
 
 export interface Platform {
