@@ -132,3 +132,9 @@ export interface UserProfile {
   currentGroupId: string;
   name?: string;
 }
+
+export interface PortfolioTarget {
+  stock: number;
+  crypto: number;
+  cash: number;
+}

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon, FileSpreadsheet, AlertTriangle, CheckSquare, Square, DollarSign, Clock, Calendar, PieChart, TrendingUp, Layers } from 'lucide-react';
+import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon, FileSpreadsheet, AlertTriangle, CheckSquare, Square, DollarSign, Clock, Calendar, PieChart, TrendingUp, Layers, Scale, ArrowRight } from 'lucide-react';
 import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog, Transaction, ChatMessage, BankAccount, InvestmentLot } from '../types';
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc, getDocs, query, orderBy, where, increment, getDoc } from 'firebase/firestore';
 import { db, getCollectionPath, auth, getUserProfilePath } from '../services/firebase';
@@ -262,6 +262,146 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
     );
 }
 
+// --- Rebalance Modal ---
+export const PortfolioRebalanceModal = ({ holdings, platforms, rates, baseCurrency, convert, onClose }: any) => {
+    const [targets, setTargets] = useState({ stock: 60, crypto: 30, cash: 10 });
+    const [aiAdvice, setAiAdvice] = useState('');
+    const [loadingAi, setLoadingAi] = useState(false);
+
+    const totalPercent = targets.stock + targets.crypto + targets.cash;
+
+    const calcData = useMemo(() => {
+        let stockTotal = 0, cryptoTotal = 0, cashTotal = 0;
+
+        platforms.forEach((p: Platform) => {
+            const val = convert(p.balance, p.currency, baseCurrency, rates);
+            cashTotal += val;
+        });
+
+        holdings.forEach((h: AssetHolding) => {
+            const price = h.manualPrice ?? h.currentPrice;
+            const val = convert(h.quantity * price, h.currency, baseCurrency, rates);
+            if (h.type === 'crypto') cryptoTotal += val;
+            else stockTotal += val;
+        });
+
+        const total = stockTotal + cryptoTotal + cashTotal;
+        const stockPct = total ? (stockTotal / total) * 100 : 0;
+        const cryptoPct = total ? (cryptoTotal / total) * 100 : 0;
+        const cashPct = total ? (cashTotal / total) * 100 : 0;
+
+        const stockDrift = stockPct - targets.stock;
+        const cryptoDrift = cryptoPct - targets.crypto;
+        const cashDrift = cashPct - targets.cash;
+
+        const stockDiffVal = total * (stockDrift / 100);
+        const cryptoDiffVal = total * (cryptoDrift / 100);
+        const cashDiffVal = total * (cashDrift / 100);
+
+        return {
+            total,
+            stock: { val: stockTotal, pct: stockPct, drift: stockDrift, diff: stockDiffVal },
+            crypto: { val: cryptoTotal, pct: cryptoPct, drift: cryptoDrift, diff: cryptoDiffVal },
+            cash: { val: cashTotal, pct: cashPct, drift: cashDrift, diff: cashDiffVal }
+        };
+    }, [holdings, platforms, rates, baseCurrency, targets]);
+
+    const handleAIAnalysis = async () => {
+        setLoadingAi(true);
+        try {
+            const prompt = `
+            As a financial advisor, analyze this portfolio rebalancing need.
+            Currency: ${baseCurrency}
+            Total Portfolio Value: ${Math.round(calcData.total)}
+            
+            Current State:
+            - Stock: ${calcData.stock.pct.toFixed(1)}% (Target ${targets.stock}%) -> Drift: ${calcData.stock.drift.toFixed(1)}% (${calcData.stock.diff > 0 ? 'Overweight' : 'Underweight'} by ${Math.round(Math.abs(calcData.stock.diff))})
+            - Crypto: ${calcData.crypto.pct.toFixed(1)}% (Target ${targets.crypto}%) -> Drift: ${calcData.crypto.drift.toFixed(1)}% (${calcData.crypto.diff > 0 ? 'Overweight' : 'Underweight'} by ${Math.round(Math.abs(calcData.crypto.diff))})
+            - Cash: ${calcData.cash.pct.toFixed(1)}% (Target ${targets.cash}%) -> Drift: ${calcData.cash.drift.toFixed(1)}% (${calcData.cash.diff > 0 ? 'Excess' : 'Shortage'} by ${Math.round(Math.abs(calcData.cash.diff))})
+
+            Holdings Detail:
+            ${holdings.map((h: any) => `- ${h.symbol} (${h.type}): ${h.quantity} shares @ ${h.manualPrice||h.currentPrice} ${h.currency}`).join('\n')}
+
+            Provide a specific, actionable rebalancing plan. 
+            1. Summary of actions (e.g. "Sell $X of Stocks, Buy $Y of Crypto").
+            2. Specific trade suggestions based on the holdings list. If needing to sell stocks, suggest selling the ones with largest position size. If needing to buy, suggest generic sector ETFs or increasing existing positions.
+            3. Keep it concise and use Traditional Chinese.
+            `;
+            
+            const result = await callGemini(prompt);
+            setAiAdvice(result);
+        } catch (e) {
+            setAiAdvice("無法連線至 AI 顧問，請稍後再試。");
+        } finally {
+            setLoadingAi(false);
+        }
+    };
+
+    const renderRow = (label: string, data: any, target: number, setTarget: Function) => (
+        <div className="mb-4">
+            <div className="flex justify-between text-sm mb-1 font-bold text-slate-700">
+                <span>{label}</span>
+                <span>{Math.round(data.val).toLocaleString()} ({data.pct.toFixed(1)}%)</span>
+            </div>
+            <div className="flex items-center gap-3">
+                <input 
+                    type="range" min="0" max="100" 
+                    value={target} onChange={e => setTarget(parseInt(e.target.value))}
+                    className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                />
+                <div className="w-16 text-right text-sm font-mono bg-slate-100 rounded px-1">Target: {target}%</div>
+            </div>
+            <div className="flex justify-between items-center mt-1 text-xs">
+                <span className="text-slate-400">偏差:</span>
+                <span className={`font-bold ${data.drift > 0 ? 'text-red-500' : data.drift < 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {data.drift > 0 ? '+' : ''}{data.drift.toFixed(1)}% 
+                    ({data.diff > 0 ? `賣出 $${Math.round(data.diff).toLocaleString()}` : `買入 $${Math.round(Math.abs(data.diff)).toLocaleString()}`})
+                </span>
+            </div>
+        </div>
+    );
+
+    return (
+        <div className={styles.overlay}>
+            <div className={`${styles.content} max-w-2xl h-[90vh]`}>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-xl flex items-center gap-2"><Scale className="text-indigo-600"/> 投資組合再平衡</h3>
+                    <button onClick={onClose}><X size={20} /></button>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-6">
+                    <h4 className="font-bold text-sm text-slate-500 mb-4 uppercase tracking-wider">配置目標設定 (總和: <span className={totalPercent!==100?'text-red-500':'text-emerald-600'}>{totalPercent}%</span>)</h4>
+                    {renderRow('股票 (Stocks)', calcData.stock, targets.stock, (v:number) => setTargets(p => ({...p, stock: v})))}
+                    {renderRow('加密貨幣 (Crypto)', calcData.crypto, targets.crypto, (v:number) => setTargets(p => ({...p, crypto: v})))}
+                    {renderRow('現金 (Cash)', calcData.cash, targets.cash, (v:number) => setTargets(p => ({...p, cash: v})))}
+                </div>
+
+                {totalPercent === 100 && (
+                    <>
+                        <button 
+                            onClick={handleAIAnalysis} 
+                            disabled={loadingAi}
+                            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transition-all flex justify-center items-center gap-2 mb-4"
+                        >
+                            {loadingAi ? <Loader2 className="animate-spin"/> : <Sparkles size={18}/>}
+                            {loadingAi ? 'AI 分析中...' : '生成再平衡建議'}
+                        </button>
+
+                        {aiAdvice && (
+                            <div className="bg-indigo-50 p-5 rounded-xl border border-indigo-100 animate-in slide-in-from-bottom-4">
+                                <h4 className="font-bold text-indigo-900 mb-3 flex items-center gap-2"><Sparkles size={16}/> AI 建議計畫</h4>
+                                <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                    {aiAdvice}
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
 // --- Transactions ---
 export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData }: any) => {
     const [type, setType] = useState<'expense' | 'income'>(editData?.type || 'expense');
@@ -305,8 +445,8 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     useEffect(() => { if (currentCats.length > 0 && !category) setCategory(currentCats[0].name); }, [type, categories]);
 
     const totalAmountVal = parseFloat(String(amount)) || 0;
-    const payerSum = payerMode === 'single' ? totalAmountVal : Object.values(multiPayers).reduce((acc: number, val) => acc + (parseFloat(val as string) || 0), 0);
-    const splitSum = splitMode === 'equal' ? totalAmountVal : Object.values(customSplits).reduce((acc: number, val) => acc + (parseFloat(val as string) || 0), 0);
+    const payerSum = payerMode === 'single' ? totalAmountVal : Object.values(multiPayers).reduce((acc: number, val: any) => acc + (parseFloat(val as string) || 0), 0);
+    const splitSum = splitMode === 'equal' ? totalAmountVal : Object.values(customSplits).reduce((acc: number, val: any) => acc + (parseFloat(val as string) || 0), 0);
     const isValidPayer = Math.abs(payerSum - totalAmountVal) < 1;
     const isValidSplit = Math.abs(splitSum - totalAmountVal) < 1;
 
@@ -486,7 +626,7 @@ export const CardDetailModal = ({ userId, card, cardLogs, transactions, allCardL
         if (!l.date?.seconds) return false;
         const d = new Date(Number(l.date.seconds) * 1000);
         return d.getTime() >= currentCycleStart.getTime() && d.getTime() <= currentCycleEnd.getTime();
-    }).sort((a: any, b: any) => (Number(b.date?.seconds) || 0) - (Number(a.date?.seconds) || 0));
+    }).sort((a: any, b: any) => (Number(b.date?.seconds as any) || 0) - (Number(a.date?.seconds as any) || 0));
     const handleSaveLog = async () => {
         if (!amt || !desc) return;
         const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));
@@ -509,10 +649,10 @@ export const AddPlatformModal = ({ userId, onClose, editData }: any) => {
     return (<div className={styles.overlay}><div className={styles.content}> <h3 className="font-bold text-xl mb-4">{editData ? '編輯投資平台' : '新增投資平台'}</h3> <div className="space-y-4"> <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={() => setType('stock')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'stock' ? 'bg-white shadow text-blue-600' : 'text-slate-400'}`}>證券戶</button><button onClick={() => setType('crypto')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'crypto' ? 'bg-white shadow text-orange-600' : 'text-slate-400'}`}>交易所</button></div> <div><label className={styles.label}>平台名稱</label><input placeholder="例如: Firstrade, 幣安" className={styles.input} value={name} onChange={e => setName(e.target.value)} /></div> <div className="grid grid-cols-2 gap-3"> <div><label className={styles.label}>{editData ? '目前現金餘額' : '初始現金餘額'}</label><input type="number" className={styles.input} value={initialCash} onChange={e => setInitialCash(e.target.value)} /></div> <div><label className={styles.label}>幣別</label><select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value)}><option>USD</option><option>TWD</option><option>USDT</option><option>JPY</option></select></div> </div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div> </div> </div></div>)
 }
 
-export const ManagePlatformCashModal = ({ platform, userId, onClose }: any) => {
+export const ManagePlatformCashModal = ({ platform, userId, onClose }: { platform: Platform, userId: string, onClose: () => void }) => {
     const [amount, setAmount] = useState('');
     const [type, setType] = useState<'deposit' | 'withdraw'>('deposit');
-    const handleSave = async () => { const val = parseFloat(String(amount)); if (!val) return; const newBal = type === 'deposit' ? (platform.balance as number) + val : (platform.balance as number) - val; await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platform.id), { balance: newBal }); onClose(); }
+    const handleSave = async () => { const val = parseFloat(String(amount)); if (!val) return; const newBal = type === 'deposit' ? platform.balance + val : platform.balance - val; await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platform.id), { balance: newBal }); onClose(); }
     return (<div className={styles.overlay}><div className={styles.content}> <h3 className="font-bold text-xl mb-4">管理 {platform.name} 現金</h3> <div className="bg-slate-50 p-3 rounded-xl mb-4 text-center"> <div className="text-xs text-slate-400">目前餘額</div> <div className="text-2xl font-bold text-slate-800">{platform.balance.toLocaleString()} {platform.currency}</div> </div> <div className="space-y-4"> <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={() => setType('deposit')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'deposit' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>入金 (Deposit)</button><button onClick={() => setType('withdraw')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'withdraw' ? 'bg-white shadow text-red-600' : 'text-slate-400'}`}>出金 (Withdraw)</button></div> <div><label className={styles.label}>金額</label><input type="number" className={styles.input} value={amount} onChange={e => setAmount(e.target.value)} /></div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認</button></div> </div> </div></div>)
 }
 
@@ -612,13 +752,13 @@ export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
     </div></div>)
 }
 
-export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
+export const EditAssetModal = ({ holding, userId, onClose, onDelete }: { holding: AssetHolding, userId: string, onClose: () => void, onDelete: () => void }) => {
     const [qty, setQty] = useState(String(holding.quantity)); const [cost, setCost] = useState(String(holding.avgCost));
     const handleSave = async () => { await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), { quantity: parseFloat(String(qty)), avgCost: parseFloat(String(cost)) }); onClose(); };
     return (<div className={styles.overlay}><div className={styles.content}> <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">編輯 {holding.symbol}</h3><button onClick={onDelete} className="text-red-500 p-2 bg-red-50 rounded-lg"><Trash2 size={18} /></button></div> <div className="space-y-4"> <div><label className={styles.label}>數量</label><input type="number" className={styles.input} value={qty} onChange={e => setQty(e.target.value)} /></div> <div><label className={styles.label}>平均成本</label><input type="number" className={styles.input} value={cost} onChange={e => setCost(e.target.value)} /></div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>更新</button></div> </div> </div></div>)
 }
 
-export const EditAssetPriceModal = ({ holding, userId, onClose, onEditInfo, onSell }: any) => {
+export const EditAssetPriceModal = ({ holding, userId, onClose, onEditInfo, onSell }: { holding: AssetHolding, userId: string, onClose: () => void, onEditInfo: () => void, onSell: () => void }) => {
     const [manualPrice, setManualPrice] = useState(holding.manualPrice ? String(holding.manualPrice) : '');
     const handleSave = async () => {
         const price = manualPrice ? parseFloat(manualPrice) : null;
@@ -1183,7 +1323,118 @@ export const BankDetailModal = ({ userId, account, logs, onClose, onImport }: an
     )
 }
 
-export const AIAssistantModal = ({ onClose, contextData }: any) => {
+export const AIBatchImportModal = ({ initialConfig, userId, groupId, categories, onClose }: any) => {
+    const [text, setText] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [results, setResults] = useState<any[]>([]);
+
+    const handleAnalyze = async () => {
+        if (!text) return;
+        setLoading(true);
+        try {
+            const catNames = categories.map((c: any) => c.name).join(', ');
+            const prompt = `
+                Parse the following transaction text (e.g. from a bank statement or receipt OCR) into a JSON array.
+                Each item must have:
+                - date: "YYYY-MM-DD" (guess current year if missing)
+                - description: string
+                - amount: number (positive)
+                - type: "expense" or "income"
+                - category: choose best match from [${catNames}] or "Other"
+                
+                Text:
+                ${text}
+                
+                Return ONLY valid JSON array.
+            `;
+            const response = await callGemini(prompt);
+            const jsonStr = response.replace(/```json|```/g, '').trim();
+            const data = JSON.parse(jsonStr);
+            if (Array.isArray(data)) {
+                setResults(data.map((item, idx) => ({ ...item, id: idx })));
+            }
+        } catch (e) {
+            console.error(e);
+            alert("AI 解析失敗，請確認格式或稍後再試");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSave = async () => {
+        const col = collection(db, getCollectionPath(userId, groupId, 'transactions'));
+        const batchPromises = results.map(item => {
+            return addDoc(col, {
+                date: Timestamp.fromDate(new Date(item.date)),
+                description: item.description,
+                totalAmount: item.amount,
+                type: item.type,
+                category: item.category,
+                payers: {}, // Default to empty or assign to user? App logic usually handles this.
+                splitDetails: {},
+                currency: 'TWD', // Default
+                createdWith: 'ai-batch'
+            });
+        });
+        await Promise.all(batchPromises);
+        onClose();
+    };
+
+    return (
+        <div className={styles.overlay}>
+            <div className={`${styles.content} max-w-3xl h-[80vh] flex flex-col`}>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-xl flex items-center gap-2"><Sparkles size={20} className="text-indigo-600"/> AI 批量匯入</h3>
+                    <button onClick={onClose}><X size={20}/></button>
+                </div>
+                
+                {results.length === 0 ? (
+                    <div className="flex-1 flex flex-col gap-4">
+                        <textarea 
+                            className="flex-1 w-full p-4 rounded-xl border bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none resize-none font-mono text-xs leading-relaxed"
+                            placeholder="貼上發票文字、銀行交易明細或 CSV 內容..."
+                            value={text}
+                            onChange={e => setText(e.target.value)}
+                        />
+                        <button 
+                            onClick={handleAnalyze} 
+                            disabled={loading || !text}
+                            className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                            {loading ? <Loader2 className="animate-spin"/> : <Wand2 size={18}/>}
+                            {loading ? 'AI 分析中...' : '開始分析'}
+                        </button>
+                    </div>
+                ) : (
+                    <div className="flex-1 flex flex-col overflow-hidden">
+                        <div className="flex-1 overflow-y-auto space-y-2 mb-4">
+                            {results.map((item, idx) => (
+                                <div key={idx} className="flex gap-2 items-center bg-slate-50 p-2 rounded-lg border border-slate-100 text-xs">
+                                    <input type="date" value={item.date} onChange={e => {const n=[...results]; n[idx].date=e.target.value; setResults(n)}} className="bg-white border rounded px-2 py-1"/>
+                                    <input value={item.description} onChange={e => {const n=[...results]; n[idx].description=e.target.value; setResults(n)}} className="flex-1 bg-white border rounded px-2 py-1"/>
+                                    <select value={item.category} onChange={e => {const n=[...results]; n[idx].category=e.target.value; setResults(n)}} className="bg-white border rounded px-2 py-1 w-24">
+                                        {categories.map((c:any) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                    </select>
+                                    <select value={item.type} onChange={e => {const n=[...results]; n[idx].type=e.target.value; setResults(n)}} className="bg-white border rounded px-2 py-1 w-20">
+                                        <option value="expense">支出</option><option value="income">收入</option>
+                                    </select>
+                                    <input type="number" value={item.amount} onChange={e => {const n=[...results]; n[idx].amount=Number(e.target.value); setResults(n)}} className="w-20 bg-white border rounded px-2 py-1 text-right"/>
+                                    <button onClick={() => setResults(results.filter((_,i)=>i!==idx))} className="text-slate-400 hover:text-red-500"><Trash2 size={14}/></button>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="flex gap-3">
+                            <button onClick={() => setResults([])} className={styles.btnSecondary}>重來</button>
+                            <button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認匯入 {results.length} 筆</button>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}
+
+export const AIAssistantModal = ({ onClose, contextData }: { onClose: () => void, contextData: { totalNetWorth: number, holdings: AssetHolding[], transactions: Transaction[] } }) => {
     const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'model', text: '嗨！我是您的財富助手。關於您的資產、記帳或投資狀況，有什麼我可以幫您的嗎？' }]);
     const [input, setInput] = useState(''); const [loading, setLoading] = useState(false); const scrollRef = useRef<HTMLDivElement>(null);
     useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages]);
@@ -1197,10 +1448,13 @@ export const AIAssistantModal = ({ onClose, contextData }: any) => {
         try { 
             // Calculate Allocation for Context
             const holdings = contextData.holdings || [];
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const totalVal = contextData.totalNetWorth || 1;
-            let stockVal = 0, cryptoVal = 0, cashVal = 0;
+            let stockVal = 0, cryptoVal = 0;
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            let cashVal = 0;
             
-            holdings.forEach((h: any) => {
+            holdings.forEach((h: AssetHolding) => {
                 const price = h.manualPrice ?? h.currentPrice;
                 const val = h.quantity * price; 
                 if (h.type === 'crypto') cryptoVal += val;
@@ -1222,309 +1476,42 @@ export const AIAssistantModal = ({ onClose, contextData }: any) => {
             const reply = await callGemini(prompt); 
             setMessages(prev => [...prev, { role: 'model', text: reply }]); 
         } catch (e) { 
-            setMessages(prev => [...prev, { role: 'model', text: '抱歉，AI 暫時無法回應。' }]); 
+            setMessages(prev => [...prev, { role: 'model', text: '抱歉，我現在無法回答。請稍後再試。' }]); 
         } finally { 
             setLoading(false); 
         } 
     };
-    return (<div className={styles.overlay}><div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col h-[600px] animate-in zoom-in-95"> <div className="p-4 border-b flex justify-between items-center bg-indigo-600 text-white rounded-t-2xl"> <h3 className="font-bold flex items-center gap-2"><Sparkles size={18} /> AI 財富助手</h3> <button onClick={onClose}><X size={20} /></button> </div> <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50" ref={scrollRef}> {messages.map((m, i) => (<div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}> <div className={`max-w-[80%] p-3 rounded-2xl text-sm leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none shadow-md' : 'bg-white text-slate-800 border border-slate-100 rounded-bl-none shadow-sm'}`}> {m.text} </div> </div>))} {loading && <div className="flex justify-start"><div className="bg-white p-3 rounded-2xl rounded-bl-none border shadow-sm flex gap-1"><div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></div><div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-75"></div><div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-150"></div></div></div>} </div> <div className="p-3 bg-white border-t rounded-b-2xl flex gap-2"> <input className="flex-1 bg-slate-100 border-0 rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none text-sm" placeholder="輸入問題..." value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSend()} /> <button onClick={handleSend} disabled={loading} className="bg-indigo-600 text-white p-3 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-all"><Send size={20} /></button> </div> </div></div>)
-}
-
-export const AIBatchImportModal = ({ userId, groupId, categories, existingTransactions, accounts, creditCards, existingBankLogs, existingCardLogs, people, onClose, initialConfig }: any) => {
-    const [mode, setMode] = useState<'text' | 'image' | 'file'>('text');
-    const [target, setTarget] = useState<'ledger' | 'bank' | 'card'>('ledger');
-    const [targetId, setTargetId] = useState('');
-
-    const [textInput, setTextInput] = useState('');
-    const [imagePreview, setImagePreview] = useState<string | null>(null);
-
-    const [parsedItems, setParsedItems] = useState<any[]>([]);
-    const [loading, setLoading] = useState(false);
-
-    useEffect(() => {
-        if (initialConfig) {
-            setTarget(initialConfig.target);
-            if (initialConfig.targetId) setTargetId(initialConfig.targetId);
-        } else {
-            if (target === 'bank' && accounts.length > 0) setTargetId(accounts[0].id);
-            if (target === 'card' && creditCards.length > 0) setTargetId(creditCards[0].id);
-        }
-    }, [target, accounts, creditCards, initialConfig]);
-
-    const checkDuplicate = (item: any) => {
-        const itemDateStr = item.date;
-        const isSameDate = (ts: any, dateStr: string) => {
-            if (!ts) return false;
-            const d = new Date(ts.seconds * 1000).toISOString().split('T')[0];
-            return d === dateStr;
-        };
-
-        if (target === 'ledger') {
-            return existingTransactions.some((t: any) => isSameDate(t.date, itemDateStr) && Math.abs(t.totalAmount - item.amount) < 1);
-        } else if (target === 'bank') {
-            return existingBankLogs.some((l: any) => {
-                if (l.accountId !== targetId) return false;
-                return isSameDate(l.date, itemDateStr) && Math.abs(l.amount - item.amount) < 1;
-            });
-        } else if (target === 'card') {
-            return existingCardLogs.some((l: any) => {
-                if (l.cardId !== targetId) return false;
-                return isSameDate(l.date, itemDateStr) && Math.abs(l.amount - item.amount) < 1;
-            });
-        }
-        return false;
-    };
-
-    const handleAnalyze = async () => {
-        if ((mode === 'text' && !textInput) || (mode === 'image' && !imagePreview) || (mode === 'file' && !textInput)) return;
-        setLoading(true);
-        try {
-            let prompt = "";
-            
-            let contentToAnalyze = mode === 'image' ? imagePreview! : textInput;
-            
-            if (mode !== 'image') {
-                contentToAnalyze = contentToAnalyze.replace(/(\d{3})[\/\-](\d{1,2})[\/\-](\d{1,2})/g, (match, y, m, d) => {
-                    const year = parseInt(y);
-                    if (year < 1911) {
-                        return `${year + 1911}-${m}-${d}`;
-                    }
-                    return match;
-                });
-            }
-
-            if (target === 'ledger') {
-                prompt = `Analyze the following data. It is likely accounting records or invoices.
-                   Ignore header rows.
-                   Extract and Map to JSON array:
-                   - description: Seller Name or Item Name
-                   - amount: Number (remove currency symbols, handle commas)
-                   - date: YYYY-MM-DD (If missing year, use current year ${new Date().getFullYear()})
-                   - type: 'expense' (default) or 'income' (if strictly implies income)
-                   - category: Choose closest match from [${categories.map((c: any) => c.name).join(', ')}] based on seller/item.
-                   `;
-            } else if (target === 'bank') {
-                prompt = `Parse the input into a JSON array of bank logs. Fields: date (YYYY-MM-DD), description, amount (number), type (in/out). Note: 'in' is deposit/income, 'out' is withdrawal/expense. Infer type from context if possible.`;
-            } else if (target === 'card') {
-                prompt = `Parse the input into a JSON array of credit card logs. Fields: date (YYYY-MM-DD), description, amount (number). Note: Amount should be positive number.`;
-            }
-
-            const res = await callGemini(prompt, contentToAnalyze);
-            const json = JSON.parse(res.replace(/```json/g, '').replace(/```/g, ''));
-
-            const items = Array.isArray(json) ? json : [json];
-            const now = new Date();
-            const processed = items.map((it: any) => {
-                let amt = it.amount;
-                if (typeof amt === 'string') {
-                    amt = parseFloat(amt.replace(/,/g, ''));
-                }
-                it.amount = amt || 0;
-                
-                if (!it.date) it.date = new Date().toISOString().split('T')[0];
-
-                const isDup = checkDuplicate(it);
-                
-                const isFuture = new Date(it.date) > now;
-                const isLarge = it.amount > 100000;
-                const isAnomaly = isFuture || isLarge;
-
-                return {
-                    ...it,
-                    id: Math.random().toString(36).substr(2, 9),
-                    selected: !isDup && !isAnomaly, 
-                    isDuplicate: isDup,
-                    isAnomaly: isAnomaly
-                };
-            });
-            setParsedItems(processed);
-        } catch (e) {
-            console.error(e);
-            alert('解析失敗，請重試');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleSave = async () => {
-        const selected = parsedItems.filter(i => i.selected);
-        if (selected.length === 0) return;
-        setLoading(true);
-        try {
-            const batch = [];
-            if (target === 'ledger') {
-                const col = collection(db, getCollectionPath(userId, groupId, 'transactions'));
-                const payerId = people.find((p: any) => p.isMe || p.uid === userId)?.id || people[0]?.id;
-                for (const item of selected) {
-                    batch.push(addDoc(col, {
-                        totalAmount: item.amount,
-                        description: item.description,
-                        category: item.category || '未分類',
-                        type: item.type || 'expense',
-                        date: Timestamp.fromDate(new Date(item.date)),
-                        currency: 'TWD',
-                        payers: { [payerId]: item.amount },
-                        splitDetails: { [payerId]: item.amount }
-                    }));
-                }
-            } else if (target === 'bank') {
-                const col = collection(db, getCollectionPath(userId, null, 'bankLogs'));
-                for (const item of selected) {
-                    batch.push(addDoc(col, {
-                        accountId: targetId,
-                        type: item.type || 'out',
-                        amount: item.amount,
-                        description: item.description,
-                        date: Timestamp.fromDate(new Date(item.date))
-                    }));
-                }
-            } else if (target === 'card') {
-                const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));
-                for (const item of selected) {
-                    batch.push(addDoc(col, {
-                        cardId: targetId,
-                        amount: item.amount,
-                        description: item.description,
-                        date: Timestamp.fromDate(new Date(item.date)),
-                        isReconciled: false
-                    }));
-                }
-            }
-            await Promise.all(batch);
-            onClose();
-        } catch (e) {
-            console.error(e);
-            alert('儲存失敗');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleImageChange = (e: any) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => setImagePreview(reader.result as string);
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const handleFileChange = (e: any) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                if (event.target?.result) {
-                    setTextInput(event.target.result as string);
-                }
-            };
-            reader.readAsText(file);
-        }
-    };
 
     return (
         <div className={styles.overlay}>
-            <div className={`${styles.content} max-w-2xl`}>
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-bold text-xl flex items-center gap-2"><Sparkles className="text-indigo-500" /> AI 批次匯入</h3>
+            <div className={`${styles.content} h-[600px] flex flex-col`}>
+                <div className="flex justify-between items-center mb-4 border-b pb-2">
+                    <div className="flex items-center gap-2 font-bold text-slate-700"><Sparkles size={18} className="text-indigo-500" /> AI 財富助手</div>
                     <button onClick={onClose}><X size={20} /></button>
                 </div>
-                {parsedItems.length === 0 ? (
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className={styles.label}>匯入目標</label>
-                                <select className={styles.input} value={target} onChange={e => setTarget(e.target.value as any)}>
-                                    <option value="ledger">記帳 (Ledger)</option>
-                                    <option value="bank">銀行 (Bank)</option>
-                                    <option value="card">信用卡 (Card)</option>
-                                </select>
-                            </div>
-                            <div>
-                                {target === 'bank' && (
-                                    <>
-                                        <label className={styles.label}>選擇帳戶</label>
-                                        <select className={styles.input} value={targetId} onChange={e => setTargetId(e.target.value)}>{accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
-                                    </>
-                                )}
-                                {target === 'card' && (
-                                    <>
-                                        <label className={styles.label}>選擇卡片</label>
-                                        <select className={styles.input} value={targetId} onChange={e => setTargetId(e.target.value)}>{creditCards.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-                                    </>
-                                )}
+                <div className="flex-1 overflow-y-auto space-y-4 p-2" ref={scrollRef}>
+                    {messages.map((m, i) => (
+                        <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-slate-100 text-slate-800 rounded-bl-none'}`}>
+                                {m.text}
                             </div>
                         </div>
-                        <div className="flex bg-slate-100 p-1 rounded-xl">
-                            <button onClick={() => setMode('text')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode === 'text' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}><FileText size={16} /> 文字貼上</button>
-                            <button onClick={() => setMode('file')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode === 'file' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}><FileSpreadsheet size={16} /> CSV/檔案</button>
-                            <button onClick={() => setMode('image')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode === 'image' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}><ImageIcon size={16} /> 圖片掃描</button>
-                        </div>
-
-                        {mode === 'text' && (
-                            <textarea className="w-full h-40 p-3 border rounded-xl text-sm" placeholder={`貼上文字內容...\n例如: 1/15 午餐 120\n1/15 計程車 250`} value={textInput} onChange={e => setTextInput(e.target.value)}></textarea>
-                        )}
-
-                        {mode === 'file' && (
-                            <div className="border-2 border-dashed border-indigo-200 rounded-xl p-8 flex flex-col items-center justify-center bg-indigo-50/50 relative hover:bg-indigo-50 transition-colors">
-                                <FileSpreadsheet size={48} className="text-indigo-400 mb-3" />
-                                <div className="text-sm font-bold text-indigo-600 mb-1">上傳 CSV 或純文字檔</div>
-                                <div className="text-xs text-slate-400 mb-4">支援台灣雲端發票匯出格式</div>
-                                {textInput ? (
-                                    <div className="w-full bg-white p-3 rounded border text-xs text-slate-600 max-h-32 overflow-hidden relative">
-                                        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-white/90"></div>
-                                        {textInput.slice(0, 200)}...
-                                    </div>
-                                ) : (
-                                    <span className="text-xs bg-white px-3 py-1 rounded-full border shadow-sm text-slate-500">選擇檔案...</span>
-                                )}
-                                <input type="file" accept=".csv,.txt" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileChange} />
-                            </div>
-                        )}
-
-                        {mode === 'image' && (
-                            <div className="border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center bg-slate-50 relative">
-                                {imagePreview ? <img src={imagePreview} className="max-h-40 rounded object-contain" /> : <div className="text-slate-400 text-center"><Camera size={32} className="mx-auto mb-2" /><span className="text-xs">點擊上傳照片</span></div>}
-                                <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleImageChange} />
-                            </div>
-                        )}
-                        <button onClick={handleAnalyze} disabled={loading} className={styles.btnPrimary}>{loading ? <Loader2 className="animate-spin" /> : 'AI 智慧分析'}</button>
-                    </div>
-                ) : (
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                            <div className="text-sm text-slate-500">解析結果 ({parsedItems.length} 筆)</div>
-                            <button onClick={() => setParsedItems([])} className="text-sm text-indigo-600 font-bold">重新上傳</button>
-                        </div>
-                        <div className="max-h-[50vh] overflow-y-auto space-y-2">
-                            {parsedItems.map((item, idx) => (
-                                <div key={item.id} className={`flex items-center gap-3 p-3 rounded-xl border ${item.isDuplicate ? 'bg-amber-50 border-amber-200' : item.isAnomaly ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
-                                    <button onClick={() => { const newItems = [...parsedItems]; newItems[idx].selected = !newItems[idx].selected; setParsedItems(newItems); }}>
-                                        {item.selected ? <CheckSquare className="text-indigo-600" /> : <Square className="text-slate-300" />}
-                                    </button>
-                                    <div className="flex-1">
-                                        <div className="flex justify-between">
-                                            <input value={item.description} onChange={e => { const n = [...parsedItems]; n[idx].description = e.target.value; setParsedItems(n) }} className="font-bold text-slate-800 text-sm bg-transparent border-b border-transparent focus:border-indigo-300 outline-none w-full" />
-                                            <div className="flex items-center gap-1 text-slate-500">
-                                                {item.isDuplicate && <span title="重複資料" className="cursor-help"><AlertTriangle size={14} className="text-amber-500" /></span>}
-                                                {item.isAnomaly && <span title="數值異常 (大額或未來日期)" className="cursor-help"><AlertCircle size={14} className="text-red-500" /></span>}
-                                                <input type="number" value={item.amount} onChange={e => { const n = [...parsedItems]; n[idx].amount = parseFloat(e.target.value); setParsedItems(n) }} className="font-bold text-indigo-600 text-right w-20 bg-transparent border-b border-transparent focus:border-indigo-300 outline-none" />
-                                            </div>
-                                        </div>
-                                        <div className="flex gap-2 mt-1">
-                                            <input type="date" value={item.date} onChange={e => { const n = [...parsedItems]; n[idx].date = e.target.value; setParsedItems(n) }} className="text-xs text-slate-400 bg-transparent" />
-                                            {target === 'ledger' && (<select value={item.category} onChange={e => { const n = [...parsedItems]; n[idx].category = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{categories.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select>)}
-                                            {(target === 'bank' || target === 'ledger') && (<select value={item.type} onChange={e => { const n = [...parsedItems]; n[idx].type = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{target === 'ledger' ? <><option value="expense">支出</option><option value="income">收入</option></> : <><option value="out">支出</option><option value="in">收入</option></>}</select>)}
-                                        </div>
-                                    </div>
-                                    <button onClick={() => { setParsedItems(parsedItems.filter((_, i) => i !== idx)) }} className="text-slate-300 hover:text-red-500"><Trash2 size={16} /></button>
-                                </div>
-                            ))}
-                        </div>
-                        <button onClick={handleSave} disabled={loading} className={styles.btnPrimary}>{loading ? <Loader2 className="animate-spin" /> : `確認匯入 (${parsedItems.filter(i => i.selected).length} 筆)`}</button>
-                    </div>
-                )}
+                    ))}
+                    {loading && <div className="flex justify-start"><div className="bg-slate-100 p-3 rounded-2xl rounded-bl-none"><Loader2 className="animate-spin text-slate-400" size={16} /></div></div>}
+                </div>
+                <div className="mt-4 pt-2 border-t flex gap-2">
+                    <input
+                        className="flex-1 bg-slate-50 border-0 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                        placeholder="輸入問題..."
+                        value={input}
+                        onChange={e => setInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleSend()}
+                    />
+                    <button onClick={handleSend} disabled={loading || !input.trim()} className="bg-indigo-600 text-white p-3 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                        <Send size={18} />
+                    </button>
+                </div>
             </div>
         </div>
-    )
-}
+    );
+};

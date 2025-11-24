@@ -1,11 +1,11 @@
 
 import React, { useState, useMemo } from 'react';
-import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal, FileSpreadsheet, Coins } from 'lucide-react';
+import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal, FileSpreadsheet, Coins, Scale } from 'lucide-react';
 import { AssetHolding, Transaction, BankAccount, CreditCardInfo, Person, BankTransaction, CreditCardLog, Platform } from '../types';
 import { ExpensePieChart } from './Charts';
 
 // --- Portfolio View ---
-export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlatform, onManageCash, onAddAsset, onSell, onEdit, onUpdatePrices, onDividend, baseCurrency, rates, convert, CURRENCY_SYMBOLS }: any) => {
+export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlatform, onManageCash, onAddAsset, onSell, onEdit, onUpdatePrices, onDividend, onRebalance, baseCurrency, rates, convert, CURRENCY_SYMBOLS }: any) => {
    const groupedData = useMemo(() => {
        const map: Record<string, AssetHolding[]> = {};
        platforms.forEach((p: Platform) => map[p.id] = []);
@@ -18,6 +18,7 @@ export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlat
          <div className="flex justify-between items-center">
             <div className="flex items-center gap-2"> <h3 className="font-bold text-lg text-slate-800">投資組合</h3> <button onClick={onManagePlatform} className="text-slate-300 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><Settings size={16}/></button> </div>
             <div className="flex gap-2"> 
+                <button onClick={onRebalance} className="bg-white border border-indigo-200 text-indigo-600 p-2 rounded-lg shadow-sm hover:bg-indigo-50 active:scale-95 transition-all" title="再平衡分析"><Scale size={16}/></button>
                 <button onClick={onUpdatePrices} className="bg-white border border-slate-200 text-slate-600 p-2 rounded-lg shadow-sm hover:bg-slate-50 active:scale-95 transition-all" title="更新股價"><RefreshCw size={16}/></button> 
                 <button onClick={onDividend} className="bg-emerald-50 border border-emerald-100 text-emerald-600 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-emerald-100" title="領取股利"><Coins size={14}/> 股利</button> 
                 <button onClick={onAddPlatform} className="bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-slate-200"><Building2 size={14}/> 平台</button> 
