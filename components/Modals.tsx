@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon, FileSpreadsheet, AlertTriangle, CheckSquare, Square, DollarSign, Clock, Calendar, PieChart, TrendingUp, Layers } from 'lucide-react';
 import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog, Transaction, ChatMessage, BankAccount, InvestmentLot } from '../types';
-import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc, getDocs, query, orderBy, where } from 'firebase/firestore';
-import { db, getCollectionPath, auth } from '../services/firebase';
+import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc, getDocs, query, orderBy, where, increment, getDoc } from 'firebase/firestore';
+import { db, getCollectionPath, auth, getUserProfilePath } from '../services/firebase';
 import { callGemini } from '../services/gemini';
 
 const styles = {
@@ -841,13 +841,14 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
     );
 };
 
-export const SellAssetModal = ({ holding, onClose, onConfirm }: any) => {
+export const SellAssetModal = ({ holding, onClose }: any) => {
     const [price, setPrice] = useState(holding.currentPrice.toString());
     const [sellQty, setSellQty] = useState(''); 
     const [mode, setMode] = useState<'fifo' | 'specific'>('fifo');
     const [lots, setLots] = useState<InvestmentLot[]>([]);
     const [selectedLots, setSelectedLots] = useState<Record<string, number>>({}); 
     const [loading, setLoading] = useState(true);
+    const [submitting, setSubmitting] = useState(false);
 
     // Fetch lots on mount
     useEffect(() => {
@@ -909,128 +910,96 @@ export const SellAssetModal = ({ holding, onClose, onConfirm }: any) => {
     }, [price, sellQty, mode, lots, selectedLots]);
 
     const handleConfirm = async () => {
-        if (pnlData.quantity <= 0) return;
-        // Delegate to parent function but now we need to handle the lots update internally or pass lots data?
-        // The original onConfirm only took price and qty. We need to refactor logic here or pass more data.
-        // To keep "Refactor" clean, we'll implement the logic inside this modal's handleConfirm and just call onConfirm to close/refresh.
-        
-        const userId = auth.currentUser!.uid;
-        const holdingRef = doc(db, getCollectionPath(userId, null, 'holdings'), holding.id);
-        
-        // 1. Determine allocations
-        let allocations: { lotId: string, amount: number, cost: number }[] = [];
-        if (mode === 'fifo') {
-            let remaining = pnlData.quantity;
-            for (const lot of lots) {
-                if (remaining <= 0) break;
-                const take = Math.min(remaining, lot.remainingQuantity);
-                allocations.push({ lotId: lot.id, amount: take, cost: lot.costPerShare });
-                remaining -= take;
-            }
-        } else {
-            Object.entries(selectedLots).forEach(([lid, sq]) => {
-                const lot = lots.find(l => l.id === lid);
-                if (lot && sq > 0) allocations.push({ lotId: lid, amount: sq, cost: lot.costPerShare });
-            });
-        }
-
-        // 2. Update/Delete Lots
-        const batchUpdates = allocations.map(async (alloc) => {
-            if (alloc.lotId === 'legacy') return; // Can't update virtual lot, just conceptually reduced
-            const lotRef = doc(db, `${getCollectionPath(userId, null, 'holdings')}/${holding.id}/lots`, alloc.lotId);
-            const originalLot = lots.find(l => l.id === alloc.lotId)!;
-            const newRem = originalLot.remainingQuantity - alloc.amount;
+        if (pnlData.quantity <= 0 || submitting) return;
+        setSubmitting(true);
+        try {
+            const userId = auth.currentUser!.uid;
+            const holdingRef = doc(db, getCollectionPath(userId, null, 'holdings'), holding.id);
             
-            if (newRem < 0.00001) {
-                // Option: Delete or Mark as Sold. Let's set to 0 for history but query filters > 0
-                await updateDoc(lotRef, { remainingQuantity: 0 });
+            // 1. Determine allocations
+            let allocations: { lotId: string, amount: number, cost: number }[] = [];
+            if (mode === 'fifo') {
+                let remaining = pnlData.quantity;
+                for (const lot of lots) {
+                    if (remaining <= 0) break;
+                    const take = Math.min(remaining, lot.remainingQuantity);
+                    allocations.push({ lotId: lot.id, amount: take, cost: lot.costPerShare });
+                    remaining -= take;
+                }
             } else {
-                await updateDoc(lotRef, { remainingQuantity: newRem });
+                Object.entries(selectedLots).forEach(([lid, sq]) => {
+                    const lot = lots.find(l => l.id === lid);
+                    if (lot && sq > 0) allocations.push({ lotId: lid, amount: sq, cost: lot.costPerShare });
+                });
             }
-        });
-        await Promise.all(batchUpdates);
 
-        // 3. Update Parent Holding
-        // Calculate new weighted average of REMAINING lots
-        // New Total Cost = (OldAvg * OldQty) - (CostBasis of Sold) ... Approximate?
-        // Better: Recalculate from remaining lots.
-        // BUT we might not have all lots loaded if paginated? Assuming we loaded all active lots.
-        // Let's use the subtraction method for efficiency.
-        const currentTotalCost = holding.avgCost * holding.quantity;
-        const soldCostBasis = pnlData.costBasis; // This is exact cost of sold items
-        const newTotalQty = holding.quantity - pnlData.quantity;
-        let newAvg = 0;
-        if (newTotalQty > 0) {
-            newAvg = Math.max(0, (currentTotalCost - soldCostBasis) / newTotalQty);
-        }
-
-        await updateDoc(holdingRef, {
-            quantity: newTotalQty,
-            avgCost: newAvg
-        });
-
-        // 4. Update Platform Cash
-        const platformRef = doc(db, getCollectionPath(userId, null, 'platforms'), holding.platformId);
-        // We need to fetch platform first to get current balance? Or use increment.
-        // Firestore `increment` works.
-        await updateDoc(platformRef, {
-            balance: import('firebase/firestore').then(({increment}) => increment(pnlData.proceeds))
-        });
-        // Actually `increment` needs import. Since we use `updateDoc` with imported `increment` in App.tsx, let's stick to pattern.
-        // Wait, standard update is `balance: old + new`. We don't have old here easily without passing platform.
-        // Let's assume onConfirm handles platform update? The original onConfirm did:
-        /*
-          const handleSellAsset = async (price, qty) => {
-             ... updates holding ...
-             ... updates platform ...
-          }
-        */
-        // Since we are moving logic HERE, we need to do it.
-        // To avoid fetching platform again, let's use `increment`.
-        // We need to import it.
-        const { increment } = await import('firebase/firestore');
-        await updateDoc(platformRef, { balance: increment(pnlData.proceeds) });
-
-        // 5. Log Transaction (Transaction Log)
-        // We need groupId for this. Passed via props? No... 
-        // We can try to find it from UserProfile or just skip for now?
-        // The original `SellAssetModal` just called `onConfirm`.
-        // We should call `onConfirm` with the results so App.tsx can log it?
-        // But App.tsx logic is simple (FIFO-agnostic).
-        // Let's keep it simple: We did the heavy lifting (Lot updates). 
-        // We call `onConfirm` but pass 0 quantity so App.tsx doesn't double-deduct? 
-        // No, `onConfirm` in App.tsx does `updateDoc(holding... qty-qty)`.
-        // If we already updated holding, `onConfirm` will update it again based on stale data?
-        // FIX: The parent `onConfirm` should be refactored or we should pass a flag.
-        // OR: We DO NOT update Firestore here, we pass the *Calculated Cost Basis* to parent?
-        // Parent `handleSellAsset` is too simple.
-        
-        // Solution: Redefine `onConfirm` prop to `onComplete` and do everything here.
-        // Since I cannot easily modify `App.tsx` logic deeply in this response without `App.tsx` content block (I have it, but it's huge),
-        // I will implement the `Transactions` logging here if I can get `groupId`.
-        // `App.tsx` passes `onConfirm` which handles Holding and Platform updates. 
-        // I will MODIFY `onConfirm` in `App.tsx` (conceptually) or just override it here.
-        // Actually, I'll just do the updates here and call `onClose`.
-        
-        // To log transaction, I need `groupId`. I'll fetch user profile.
-        const userProfileSnap = await import('firebase/firestore').then(({getDoc}) => getDoc(doc(db, `artifacts/wealthflow-stable-restore/users/${userId}`)));
-        const groupId = userProfileSnap.data()?.currentGroupId;
-        
-        if (groupId) {
-            await addDoc(collection(db, getCollectionPath(userId, groupId, 'transactions')), {
-                totalAmount: pnlData.proceeds,
-                description: `賣出資產: ${holding.symbol} (${pnlData.quantity}股 @ ${price}) - 獲利: ${pnlData.realizedPnL.toFixed(0)}`,
-                category: '投資回收',
-                type: 'income',
-                date: serverTimestamp(),
-                currency: holding.currency,
-                payers: {}, 
-                splitDetails: {}
+            // 2. Update/Delete Lots
+            const batchUpdates = allocations.map(async (alloc) => {
+                if (alloc.lotId === 'legacy') return; // Can't update virtual lot, just conceptually reduced
+                const lotRef = doc(db, `${getCollectionPath(userId, null, 'holdings')}/${holding.id}/lots`, alloc.lotId);
+                const originalLot = lots.find(l => l.id === alloc.lotId)!;
+                const newRem = originalLot.remainingQuantity - alloc.amount;
+                
+                if (newRem < 0.00001) {
+                    await updateDoc(lotRef, { remainingQuantity: 0 });
+                } else {
+                    await updateDoc(lotRef, { remainingQuantity: newRem });
+                }
             });
-        }
+            await Promise.all(batchUpdates);
 
-        onClose(); // Close modal
+            // 3. Update Parent Holding
+            const currentTotalCost = holding.avgCost * holding.quantity;
+            const soldCostBasis = pnlData.costBasis; // This is exact cost of sold items
+            const newTotalQty = holding.quantity - pnlData.quantity;
+            let newAvg = 0;
+            if (newTotalQty > 0) {
+                newAvg = Math.max(0, (currentTotalCost - soldCostBasis) / newTotalQty);
+                await updateDoc(holdingRef, {
+                    quantity: newTotalQty,
+                    avgCost: newAvg
+                });
+            } else {
+                // If quantity effectively 0, delete the holding or set to 0
+                if (newTotalQty <= 0.000001) {
+                    await deleteDoc(holdingRef);
+                } else {
+                    await updateDoc(holdingRef, { quantity: newTotalQty, avgCost: newAvg });
+                }
+            }
+
+            // 4. Update Platform Cash
+            const platformRef = doc(db, getCollectionPath(userId, null, 'platforms'), holding.platformId);
+            await updateDoc(platformRef, { balance: increment(pnlData.proceeds) });
+
+            // 5. Log Transaction (Transaction Log)
+            const userProfileSnap = await getDoc(doc(db, getUserProfilePath(userId)));
+            const groupId = userProfileSnap.data()?.currentGroupId;
+            
+            if (groupId) {
+                await addDoc(collection(db, getCollectionPath(userId, groupId, 'transactions')), {
+                    totalAmount: pnlData.proceeds,
+                    description: `賣出資產: ${holding.symbol} (${pnlData.quantity}股 @ ${price}) - 獲利: ${pnlData.realizedPnL.toFixed(0)}`,
+                    category: '投資回收',
+                    type: 'income',
+                    date: serverTimestamp(),
+                    currency: holding.currency,
+                    payers: {}, 
+                    splitDetails: {}
+                });
+            }
+
+            onClose(); 
+        } catch (e) {
+            console.error(e);
+            alert('賣出失敗: ' + (e as Error).message);
+        } finally {
+            setSubmitting(false);
+        }
     };
+
+    // Helper to format numbers
+    const fmt = (n: number, d = 2) => n?.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: d });
 
     return (
         <div className={styles.overlay}>
@@ -1038,7 +1007,7 @@ export const SellAssetModal = ({ holding, onClose, onConfirm }: any) => {
                 <div className="flex justify-between items-center mb-4">
                     <div>
                         <h3 className="font-bold text-xl">賣出 {holding.symbol}</h3>
-                        <div className="text-xs text-slate-400">持有: {holding.quantity} | 均價: {holding.avgCost}</div>
+                        <div className="text-xs text-slate-400">持有: {fmt(holding.quantity, 4)} | 均價: {fmt(holding.avgCost, 2)}</div>
                     </div>
                     <button onClick={onClose}><X size={20} /></button>
                 </div>
@@ -1066,10 +1035,10 @@ export const SellAssetModal = ({ holding, onClose, onConfirm }: any) => {
                                 <div className="max-h-40 overflow-y-auto">
                                     {lots.map(lot => (
                                         <div key={lot.id} className="px-3 py-2 border-b last:border-0 grid grid-cols-4 gap-2 items-center text-sm">
-                                            <div className="text-slate-600">{lot.date.seconds ? new Date(lot.date.seconds*1000).toLocaleDateString() : 'Legacy'}</div>
-                                            <div>{lot.costPerShare}</div>
-                                            <div>{lot.remainingQuantity}</div>
-                                            <input type="number" className="border rounded px-1 py-0.5 w-full text-right" placeholder="0" min="0" max={lot.remainingQuantity} 
+                                            <div className="text-slate-600 text-xs">{lot.date.seconds ? new Date(lot.date.seconds*1000).toLocaleDateString() : 'Legacy'}</div>
+                                            <div className="truncate" title={lot.costPerShare.toString()}>{fmt(lot.costPerShare, 2)}</div>
+                                            <div className="truncate" title={lot.remainingQuantity.toString()}>{fmt(lot.remainingQuantity, 4)}</div>
+                                            <input type="number" className="border rounded px-1 py-0.5 w-full text-right text-xs" placeholder="0" min="0" max={lot.remainingQuantity} 
                                                 value={selectedLots[lot.id] || ''} 
                                                 onChange={e => setSelectedLots(prev => ({...prev, [lot.id]: parseFloat(e.target.value)}))}
                                             />
@@ -1082,23 +1051,25 @@ export const SellAssetModal = ({ holding, onClose, onConfirm }: any) => {
                         <div className="bg-slate-50 p-4 rounded-xl space-y-2 border border-slate-100">
                             <div className="flex justify-between text-sm">
                                 <span className="text-slate-500">預估賣出總值 (Proceeds)</span>
-                                <span className="font-bold font-mono text-slate-800">${pnlData.proceeds.toLocaleString()}</span>
+                                <span className="font-bold font-mono text-slate-800">${fmt(pnlData.proceeds, 2)}</span>
                             </div>
                             <div className="flex justify-between text-sm">
                                 <span className="text-slate-500">成本 (Cost Basis)</span>
-                                <span className="font-mono text-slate-600">${pnlData.costBasis.toLocaleString()}</span>
+                                <span className="font-mono text-slate-600">${fmt(pnlData.costBasis, 2)}</span>
                             </div>
                             <div className="border-t border-slate-200 pt-2 flex justify-between items-center">
                                 <span className="font-bold text-slate-700">實現損益 (Realized PnL)</span>
                                 <span className={`text-lg font-bold ${pnlData.realizedPnL >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                                    {pnlData.realizedPnL > 0 ? '+' : ''}{pnlData.realizedPnL.toLocaleString()}
+                                    {pnlData.realizedPnL > 0 ? '+' : ''}{fmt(pnlData.realizedPnL, 2)}
                                 </span>
                             </div>
                         </div>
 
                         <div className="flex gap-3">
-                            <button onClick={onClose} className={styles.btnSecondary}>取消</button>
-                            <button onClick={handleConfirm} className={`${styles.btnPrimary} flex-1`} disabled={pnlData.quantity <= 0}>確認賣出</button>
+                            <button onClick={onClose} disabled={submitting} className={styles.btnSecondary}>取消</button>
+                            <button onClick={handleConfirm} className={`${styles.btnPrimary} flex-1`} disabled={pnlData.quantity <= 0 || submitting}>
+                                {submitting ? <Loader2 className="animate-spin" /> : '確認賣出'}
+                            </button>
                         </div>
                     </div>
                 )}
