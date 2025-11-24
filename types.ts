@@ -93,6 +93,8 @@ export interface RecurringRule {
   active: boolean;
   payers?: Record<string, number>;
   splitDetails?: Record<string, number>;
+  linkedHoldingId?: string; // For DRIP: which asset to update
+  isDRIP?: boolean; // If true, calculates shares and updates holding instead of cash
 }
 
 export interface NetWorthHistory {

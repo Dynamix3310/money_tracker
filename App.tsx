@@ -156,6 +156,7 @@ export default function App() {
    const checkRecurringRules = async () => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+      const apiKey = localStorage.getItem('finnhub_key') || undefined;
 
       for (const rule of recurringRules) {
          if (!rule.active || !rule.nextDate) continue;
@@ -163,25 +164,74 @@ export default function App() {
          nextDate.setHours(0, 0, 0, 0);
 
          if (nextDate.getTime() <= today.getTime()) {
+            let transDesc = `${rule.name} (自動)`;
+            let shouldUpdateCash = true;
+
+            // --- DRIP LOGIC ---
+            if (rule.isDRIP && rule.linkedHoldingId) {
+                shouldUpdateCash = false; // DRIP does not increase platform cash
+                try {
+                    const holdingRef = doc(db, getCollectionPath(user!.uid, null, 'holdings'), rule.linkedHoldingId);
+                    const holdingSnap = await getDoc(holdingRef);
+                    
+                    if (holdingSnap.exists()) {
+                        const h = holdingSnap.data() as AssetHolding;
+                        let price = h.manualPrice;
+                        
+                        // Attempt fresh fetch if no manual price
+                        if (!price) {
+                            if (h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
+                            else price = await fetchStockPrice(h.symbol, apiKey);
+                        }
+                        
+                        // Fallback to last known
+                        if (!price || price <= 0) price = h.currentPrice;
+                        
+                        if (price && price > 0) {
+                            const newShares = rule.amount / price;
+                            const oldTotalCost = h.quantity * h.avgCost;
+                            const newTotalCost = oldTotalCost + rule.amount;
+                            const newQty = h.quantity + newShares;
+                            const newAvgCost = newTotalCost / newQty;
+                            
+                            await updateDoc(holdingRef, {
+                                quantity: newQty,
+                                avgCost: newAvgCost,
+                                currentPrice: price // Update price too
+                            });
+                            
+                            transDesc = `股息自動再投入 (DRIP): ${h.symbol} (約${newShares.toFixed(4)}股 @ ${price})`;
+                        } else {
+                            transDesc = `股息再投入異常: ${h.symbol} (無法取得股價)`;
+                        }
+                    } else {
+                        transDesc = `股息再投入失敗: 資產已不存在`;
+                    }
+                } catch (e) {
+                    console.error("DRIP Error", e);
+                    transDesc = `股息再投入失敗 (系統錯誤)`;
+                }
+            }
+
             // 1. Create Transaction Record
             const newTrans = {
                totalAmount: rule.amount,
-               description: `${rule.name} (自動)`,
+               description: transDesc,
                category: rule.category,
                type: rule.type,
                payers: rule.payers || { [rule.payerId]: rule.amount },
                splitDetails: rule.splitDetails || { [rule.payerId]: rule.amount },
                date: Timestamp.fromDate(new Date()),
-               currency: 'TWD', // Default to Ledger currency for the transaction log
+               currency: 'TWD', // Default currency for logs
                isRecurring: true
             };
             await addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'transactions')), newTrans);
 
-            // 2. If linked to a platform, auto-update balance (Atomic increment)
-            if (rule.linkedPlatformId) {
+            // 2. If linked to a platform (and not DRIP), auto-update balance
+            if (rule.linkedPlatformId && shouldUpdateCash) {
                 const platformRef = doc(db, getCollectionPath(user!.uid, null, 'platforms'), rule.linkedPlatformId);
                 await updateDoc(platformRef, {
-                    balance: increment(rule.amount) // rule.amount is positive, so adds to balance
+                    balance: increment(rule.amount)
                 });
             }
 

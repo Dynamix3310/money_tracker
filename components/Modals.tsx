@@ -612,46 +612,68 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
         const payerId = people.find((p: any) => p.isMe || p.uid === userId)?.id || people[0]?.id;
         
         if (type === 'stock') {
-            // --- DRIP LOGIC (Dividend Reinvestment Plan) ---
             const holding = platformHoldings.find((h:any) => h.symbol === assetSymbol);
             if (!holding) {
                 alert('請選擇要再投資的資產');
                 return;
             }
-            
-            const price = holding.manualPrice || holding.currentPrice;
-            if (!price || price <= 0) {
-                alert('無法取得當前股價，無法計算再投資股數');
-                return;
-            }
 
-            // 1. Calculate Shares based on Dividend Amount / Price
-            const newShares = val / price;
-            
-            // 2. Update Holding: 
-            // New Total Cost = Old Total Cost + Dividend Amount (Reinvested)
-            const oldTotalCost = holding.quantity * holding.avgCost;
-            const newTotalCost = oldTotalCost + val;
-            const newQty = holding.quantity + newShares;
-            const newAvgCost = newTotalCost / newQty;
+            if (frequency === 'once') {
+                // --- DRIP LOGIC (Immediate) ---
+                const price = holding.manualPrice || holding.currentPrice;
+                if (!price || price <= 0) {
+                    alert('無法取得當前股價，無法計算再投資股數');
+                    return;
+                }
 
-            await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), {
-                quantity: newQty,
-                avgCost: newAvgCost
-            });
+                // 1. Calculate Shares based on Dividend Amount / Price
+                const newShares = val / price;
+                
+                // 2. Update Holding: 
+                // New Total Cost = Old Total Cost + Dividend Amount (Reinvested)
+                const oldTotalCost = holding.quantity * holding.avgCost;
+                const newTotalCost = oldTotalCost + val;
+                const newQty = holding.quantity + newShares;
+                const newAvgCost = newTotalCost / newQty;
 
-            // 3. Transaction Record
-            if (addTransaction) {
-                await addDoc(collection(db, getCollectionPath(userId, groupId, 'transactions')), {
-                    totalAmount: val,
-                    description: `股息再投入 (DRIP): ${assetSymbol} (${newShares.toFixed(4)}股)`,
-                    category: '投資收益',
+                await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), {
+                    quantity: newQty,
+                    avgCost: newAvgCost
+                });
+
+                // 3. Transaction Record
+                if (addTransaction) {
+                    await addDoc(collection(db, getCollectionPath(userId, groupId, 'transactions')), {
+                        totalAmount: val,
+                        description: `股息再投入 (DRIP): ${assetSymbol} (${newShares.toFixed(4)}股)`,
+                        category: '投資收益',
+                        type: 'income',
+                        date: Timestamp.fromDate(new Date(date)),
+                        currency: platform?.currency || 'USD',
+                        payers: { [payerId]: val },
+                        splitDetails: { [payerId]: val }
+                    });
+                }
+            } else {
+                // --- DRIP LOGIC (Recurring Rule) ---
+                const interval = parseInt(frequency);
+                const nextDate = new Date(date); 
+                const ruleData = {
+                    name: `股息再投入: ${assetSymbol}`,
+                    amount: val,
                     type: 'income',
-                    date: Timestamp.fromDate(new Date(date)),
-                    currency: platform?.currency || 'USD',
+                    category: '投資收益',
+                    payerId: payerId,
+                    frequency: 'custom',
+                    intervalMonths: interval,
+                    linkedHoldingId: holding.id, // Link to holding for auto-update
+                    isDRIP: true,
+                    active: true,
+                    nextDate: Timestamp.fromDate(nextDate),
                     payers: { [payerId]: val },
                     splitDetails: { [payerId]: val }
-                });
+                };
+                await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), ruleData);
             }
 
         } else {
@@ -673,7 +695,7 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                     });
                 }
             } else {
-                // Recurring Rule
+                // Recurring Rule (Cash)
                 const interval = parseInt(frequency);
                 const nextDate = new Date(date); 
                 const ruleData = {
@@ -739,18 +761,16 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                         <input type="date" className={styles.input} value={date} onChange={e => setDate(e.target.value)} />
                     </div>
                     
-                    {type === 'cash' && (
-                        <div>
-                            <label className={styles.label}>領取週期</label>
-                            <div className="grid grid-cols-3 gap-2">
-                                <button onClick={() => setFrequency('once')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === 'once' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>單次領取</button>
-                                <button onClick={() => setFrequency('1')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '1' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每月</button>
-                                <button onClick={() => setFrequency('3')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '3' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每季 (3月)</button>
-                                <button onClick={() => setFrequency('6')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '6' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每半年</button>
-                                <button onClick={() => setFrequency('12')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '12' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每年</button>
-                            </div>
+                    <div>
+                        <label className={styles.label}>領取週期</label>
+                        <div className="grid grid-cols-3 gap-2">
+                            <button onClick={() => setFrequency('once')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === 'once' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>單次領取</button>
+                            <button onClick={() => setFrequency('1')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '1' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每月</button>
+                            <button onClick={() => setFrequency('3')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '3' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每季 (3月)</button>
+                            <button onClick={() => setFrequency('6')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '6' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每半年</button>
+                            <button onClick={() => setFrequency('12')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '12' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每年</button>
                         </div>
-                    )}
+                    </div>
 
                     {frequency === 'once' && (
                         <div className="flex items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100">
@@ -763,6 +783,13 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                         <div className="bg-amber-50 p-3 rounded-xl text-xs text-amber-800 border border-amber-100 flex gap-2">
                             <Clock size={16} className="shrink-0" />
                             設定為固定收支後，系統將在時間到達時自動增加平台餘額並記錄收入。
+                        </div>
+                    )}
+
+                    {frequency !== 'once' && type === 'stock' && (
+                        <div className="bg-blue-50 p-3 rounded-xl text-xs text-blue-800 border border-blue-100 flex gap-2">
+                            <RefreshCw size={16} className="shrink-0" />
+                            設定為自動 DRIP 後，系統將在時間到達時，以「當時市價」將 {amount} {platform?.currency} 自動買入對應股數。
                         </div>
                     )}
 
