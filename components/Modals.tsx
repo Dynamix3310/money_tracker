@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon, FileSpreadsheet, AlertTriangle, CheckSquare, Square, DollarSign, Clock, Calendar } from 'lucide-react';
+import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon, FileSpreadsheet, AlertTriangle, CheckSquare, Square, DollarSign, Clock, Calendar, PieChart, TrendingUp } from 'lucide-react';
 import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog, Transaction, ChatMessage, BankAccount } from '../types';
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc } from 'firebase/firestore';
 import { db, getCollectionPath, auth } from '../services/firebase';
@@ -540,11 +540,8 @@ export const EditAssetPriceModal = ({ holding, userId, onClose, onEditInfo, onSe
     const [manualPrice, setManualPrice] = useState(holding.manualPrice ? String(holding.manualPrice) : '');
     const handleSave = async () => {
         const price = manualPrice ? parseFloat(manualPrice) : null;
-        // If price is valid number, update manualPrice. If empty, remove the field (or set null)
         const payload: any = { manualPrice: price };
         if (price === null || isNaN(price)) {
-            // To remove a field in Firestore, typically use FieldValue.delete(), but updateDoc with null works for "unsetting" in our logic if we check null
-            // Or explicitly delete the field. For simplicity, we set to null and App.tsx checks `manualPrice ?? currentPrice`
             payload.manualPrice = null; 
         }
         await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), payload);
@@ -579,10 +576,10 @@ export const EditAssetPriceModal = ({ holding, userId, onClose, onEditInfo, onSe
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => { onClose(); onEditInfo(); }} className="py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm flex flex-col items-center justify-center gap-1">
+                        <button onClick={onEditInfo} className="py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm flex flex-col items-center justify-center gap-1">
                             <Edit size={18} /> 修改成本/數量
                         </button>
-                        <button onClick={() => { onClose(); onSell(); }} className="py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm flex flex-col items-center justify-center gap-1">
+                        <button onClick={onSell} className="py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm flex flex-col items-center justify-center gap-1">
                             <DollarSign size={18} /> 賣出資產
                         </button>
                     </div>
@@ -598,55 +595,103 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
     const [amount, setAmount] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [frequency, setFrequency] = useState<'once' | '1' | '3' | '6' | '12'>('once');
+    const [type, setType] = useState<'cash' | 'stock'>('cash');
     const [addTransaction, setAddTransaction] = useState(true);
 
     const platform = platforms.find((p:any) => p.id === platformId);
     const platformHoldings = holdings.filter((h:any) => h.platformId === platformId);
+    
+    // For DRIP calculation
+    const currentAsset = platformHoldings.find((h:any) => h.symbol === assetSymbol);
+    const currentPrice = currentAsset ? (currentAsset.manualPrice || currentAsset.currentPrice) : 0;
+    const dripShares = (type === 'stock' && amount && currentPrice > 0) ? parseFloat(amount) / currentPrice : 0;
 
     const handleSave = async () => {
         if(!platformId || !amount) return;
         const val = parseFloat(amount);
         const payerId = people.find((p: any) => p.isMe || p.uid === userId)?.id || people[0]?.id;
         
-        if (frequency === 'once') {
-            // 1. One-time Deposit
-            const platformRef = doc(db, getCollectionPath(userId, null, 'platforms'), platformId);
-            await updateDoc(platformRef, { balance: (platform.balance || 0) + val });
+        if (type === 'stock') {
+            // --- DRIP LOGIC (Dividend Reinvestment Plan) ---
+            const holding = platformHoldings.find((h:any) => h.symbol === assetSymbol);
+            if (!holding) {
+                alert('請選擇要再投資的資產');
+                return;
+            }
+            
+            const price = holding.manualPrice || holding.currentPrice;
+            if (!price || price <= 0) {
+                alert('無法取得當前股價，無法計算再投資股數');
+                return;
+            }
 
-            // 2. Optional: Add Ledger Transaction
-            if(addTransaction) {
-                const transData = {
+            // 1. Calculate Shares based on Dividend Amount / Price
+            const newShares = val / price;
+            
+            // 2. Update Holding: 
+            // New Total Cost = Old Total Cost + Dividend Amount (Reinvested)
+            const oldTotalCost = holding.quantity * holding.avgCost;
+            const newTotalCost = oldTotalCost + val;
+            const newQty = holding.quantity + newShares;
+            const newAvgCost = newTotalCost / newQty;
+
+            await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), {
+                quantity: newQty,
+                avgCost: newAvgCost
+            });
+
+            // 3. Transaction Record
+            if (addTransaction) {
+                await addDoc(collection(db, getCollectionPath(userId, groupId, 'transactions')), {
                     totalAmount: val,
-                    description: `股利收入 (${assetSymbol || 'General'})`,
-                    category: '投資收益', // Assuming this category exists or user is okay with auto-creating/using general
+                    description: `股息再投入 (DRIP): ${assetSymbol} (${newShares.toFixed(4)}股)`,
+                    category: '投資收益',
                     type: 'income',
                     date: Timestamp.fromDate(new Date(date)),
                     currency: platform?.currency || 'USD',
                     payers: { [payerId]: val },
                     splitDetails: { [payerId]: val }
-                };
-                await addDoc(collection(db, getCollectionPath(userId, groupId, 'transactions')), transData);
+                });
             }
+
         } else {
-            // Recurring Rule
-            const interval = parseInt(frequency);
-            const nextDate = new Date(date); // First execution date
-            // We add a new recurring rule
-            const ruleData = {
-                name: `股利: ${assetSymbol || 'General'}`,
-                amount: val,
-                type: 'income',
-                category: '投資收益',
-                payerId: payerId,
-                frequency: 'custom',
-                intervalMonths: interval,
-                linkedPlatformId: platformId, // This triggers the auto-deposit logic in App.tsx
-                active: true,
-                nextDate: Timestamp.fromDate(nextDate),
-                payers: { [payerId]: val },
-                splitDetails: { [payerId]: val }
-            };
-            await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), ruleData);
+            // --- CASH DIVIDEND LOGIC ---
+            if (frequency === 'once') {
+                const platformRef = doc(db, getCollectionPath(userId, null, 'platforms'), platformId);
+                await updateDoc(platformRef, { balance: (platform.balance || 0) + val });
+
+                if(addTransaction) {
+                    await addDoc(collection(db, getCollectionPath(userId, groupId, 'transactions')), {
+                        totalAmount: val,
+                        description: `現金股利 (${assetSymbol || 'General'})`,
+                        category: '投資收益',
+                        type: 'income',
+                        date: Timestamp.fromDate(new Date(date)),
+                        currency: platform?.currency || 'USD',
+                        payers: { [payerId]: val },
+                        splitDetails: { [payerId]: val }
+                    });
+                }
+            } else {
+                // Recurring Rule
+                const interval = parseInt(frequency);
+                const nextDate = new Date(date); 
+                const ruleData = {
+                    name: `股利: ${assetSymbol || 'General'}`,
+                    amount: val,
+                    type: 'income',
+                    category: '投資收益',
+                    payerId: payerId,
+                    frequency: 'custom',
+                    intervalMonths: interval,
+                    linkedPlatformId: platformId,
+                    active: true,
+                    nextDate: Timestamp.fromDate(nextDate),
+                    payers: { [payerId]: val },
+                    splitDetails: { [payerId]: val }
+                };
+                await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), ruleData);
+            }
         }
         
         onClose();
@@ -656,6 +701,12 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
         <div className={styles.overlay}>
             <div className={styles.content}>
                 <h3 className="font-bold text-xl mb-4">領取股利 / 配息設定</h3>
+                
+                <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
+                    <button onClick={() => setType('cash')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'cash' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>現金股利 (除息)</button>
+                    <button onClick={() => { setType('stock'); setFrequency('once'); }} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'stock' ? 'bg-white shadow text-blue-600' : 'text-slate-400'}`}>股息再投入 (DRIP)</button>
+                </div>
+
                 <div className="space-y-4">
                     <div>
                         <label className={styles.label}>入帳平台</label>
@@ -664,40 +715,51 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                         </select>
                     </div>
                     <div>
-                        <label className={styles.label}>標的 (可選)</label>
+                        <label className={styles.label}>標的 {type === 'stock' && <span className="text-red-500">*必填</span>}</label>
                         <select className={styles.input} value={assetSymbol} onChange={e => setAssetSymbol(e.target.value)}>
                             <option value="">-- 選擇資產 --</option>
                             {platformHoldings.map((h:any) => <option key={h.id} value={h.symbol}>{h.symbol}</option>)}
                         </select>
                     </div>
                     <div>
-                        <label className={styles.label}>金額 ({platform?.currency})</label>
+                        <label className={styles.label}>
+                            {type === 'stock' ? `股息金額 (${platform?.currency})` : `金額 (${platform?.currency})`}
+                        </label>
                         <input type="number" className={styles.input} value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+                        
+                        {type === 'stock' && currentAsset && amount && (
+                            <div className="text-xs text-indigo-600 font-bold mt-1 bg-indigo-50 p-2 rounded-lg flex items-center gap-2 animate-in slide-in-from-top-2">
+                                <RefreshCw size={12} />
+                                以現價 {currentPrice} 計算，約自動買入 {dripShares.toFixed(4)} 股
+                            </div>
+                        )}
                     </div>
                     <div>
-                        <label className={styles.label}>入帳日期 (或首次執行日)</label>
+                        <label className={styles.label}>入帳日期</label>
                         <input type="date" className={styles.input} value={date} onChange={e => setDate(e.target.value)} />
                     </div>
                     
-                    <div>
-                        <label className={styles.label}>領取週期</label>
-                        <div className="grid grid-cols-3 gap-2">
-                            <button onClick={() => setFrequency('once')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === 'once' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>單次領取</button>
-                            <button onClick={() => setFrequency('1')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '1' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每月</button>
-                            <button onClick={() => setFrequency('3')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '3' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每季 (3月)</button>
-                            <button onClick={() => setFrequency('6')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '6' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每半年</button>
-                            <button onClick={() => setFrequency('12')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '12' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每年</button>
+                    {type === 'cash' && (
+                        <div>
+                            <label className={styles.label}>領取週期</label>
+                            <div className="grid grid-cols-3 gap-2">
+                                <button onClick={() => setFrequency('once')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === 'once' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>單次領取</button>
+                                <button onClick={() => setFrequency('1')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '1' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每月</button>
+                                <button onClick={() => setFrequency('3')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '3' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每季 (3月)</button>
+                                <button onClick={() => setFrequency('6')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '6' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每半年</button>
+                                <button onClick={() => setFrequency('12')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '12' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每年</button>
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     {frequency === 'once' && (
                         <div className="flex items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100">
                             <input type="checkbox" id="addTrans" checked={addTransaction} onChange={e => setAddTransaction(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500" />
-                            <label htmlFor="addTrans" className="text-sm font-bold text-indigo-700 cursor-pointer select-none">同步新增至記帳 (收入)</label>
+                            <label htmlFor="addTrans" className="text-sm font-bold text-indigo-700 cursor-pointer select-none">同步新增至記帳紀錄</label>
                         </div>
                     )}
                     
-                    {frequency !== 'once' && (
+                    {frequency !== 'once' && type === 'cash' && (
                         <div className="bg-amber-50 p-3 rounded-xl text-xs text-amber-800 border border-amber-100 flex gap-2">
                             <Clock size={16} className="shrink-0" />
                             設定為固定收支後，系統將在時間到達時自動增加平台餘額並記錄收入。
@@ -828,7 +890,46 @@ export const AIAssistantModal = ({ onClose, contextData }: any) => {
     const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'model', text: '嗨！我是您的財富助手。關於您的資產、記帳或投資狀況，有什麼我可以幫您的嗎？' }]);
     const [input, setInput] = useState(''); const [loading, setLoading] = useState(false); const scrollRef = useRef<HTMLDivElement>(null);
     useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages]);
-    const handleSend = async () => { if (!input.trim() || loading) return; const userMsg = input; setInput(''); setMessages(prev => [...prev, { role: 'user', text: userMsg }]); setLoading(true); try { const prompt = `User Data Context: Net Worth: ${contextData.totalNetWorth}, Holdings: ${JSON.stringify(contextData.holdings.map((h: any) => ({ s: h.symbol, q: h.quantity, c: h.avgCost })))}. Recent Trans: ${JSON.stringify(contextData.transactions.slice(0, 5).map((t: any) => ({ d: t.description, a: t.totalAmount })))}. User Question: ${userMsg}. Answer briefly in Traditional Chinese.`; const reply = await callGemini(prompt); setMessages(prev => [...prev, { role: 'model', text: reply }]); } catch (e) { setMessages(prev => [...prev, { role: 'model', text: '抱歉，AI 暫時無法回應。' }]); } finally { setLoading(false); } };
+    
+    const handleSend = async () => { 
+        if (!input.trim() || loading) return; 
+        const userMsg = input; 
+        setInput(''); 
+        setMessages(prev => [...prev, { role: 'user', text: userMsg }]); 
+        setLoading(true); 
+        try { 
+            // Calculate Allocation for Context
+            const holdings = contextData.holdings || [];
+            const totalVal = contextData.totalNetWorth || 1;
+            let stockVal = 0, cryptoVal = 0, cashVal = 0;
+            
+            holdings.forEach((h: any) => {
+                const price = h.manualPrice ?? h.currentPrice;
+                const val = h.quantity * price; 
+                if (h.type === 'crypto') cryptoVal += val;
+                else stockVal += val;
+            });
+            
+            const prompt = `
+            You are a financial advisor.
+            Context: 
+            Total Net Worth: ${Math.round(contextData.totalNetWorth)}
+            Holdings Summary: ${holdings.length} items.
+            Recent Trans: ${JSON.stringify(contextData.transactions.slice(0, 3).map((t: any) => ({ d: t.description, a: t.totalAmount })))}. 
+            
+            User Question: ${userMsg}. 
+            
+            Answer briefly in Traditional Chinese.
+            If the user asks about "Portfolio Health" or "Rebalancing", analyze their asset allocation (Stocks vs Crypto) and suggest if they are too concentrated.
+            `;
+            const reply = await callGemini(prompt); 
+            setMessages(prev => [...prev, { role: 'model', text: reply }]); 
+        } catch (e) { 
+            setMessages(prev => [...prev, { role: 'model', text: '抱歉，AI 暫時無法回應。' }]); 
+        } finally { 
+            setLoading(false); 
+        } 
+    };
     return (<div className={styles.overlay}><div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col h-[600px] animate-in zoom-in-95"> <div className="p-4 border-b flex justify-between items-center bg-indigo-600 text-white rounded-t-2xl"> <h3 className="font-bold flex items-center gap-2"><Sparkles size={18} /> AI 財富助手</h3> <button onClick={onClose}><X size={20} /></button> </div> <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50" ref={scrollRef}> {messages.map((m, i) => (<div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}> <div className={`max-w-[80%] p-3 rounded-2xl text-sm leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none shadow-md' : 'bg-white text-slate-800 border border-slate-100 rounded-bl-none shadow-sm'}`}> {m.text} </div> </div>))} {loading && <div className="flex justify-start"><div className="bg-white p-3 rounded-2xl rounded-bl-none border shadow-sm flex gap-1"><div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></div><div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-75"></div><div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-150"></div></div></div>} </div> <div className="p-3 bg-white border-t rounded-b-2xl flex gap-2"> <input className="flex-1 bg-slate-100 border-0 rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none text-sm" placeholder="輸入問題..." value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSend()} /> <button onClick={handleSend} disabled={loading} className="bg-indigo-600 text-white p-3 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-all"><Send size={20} /></button> </div> </div></div>)
 }
 
@@ -882,52 +983,51 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
         setLoading(true);
         try {
             let prompt = "";
-            const commonInstruction = `Parse the input into a JSON array. Infer type (expense/income) and category (from: ${categories.map((c: any) => c.name).join(',')}) based on description.`;
-
-            // Special handling for CSV/File inputs which might be Taiwan Cloud Invoices
-            const isCSV = mode === 'file' || (mode === 'text' && textInput.includes(','));
+            
+            let contentToAnalyze = mode === 'image' ? imagePreview! : textInput;
+            
+            if (mode !== 'image') {
+                contentToAnalyze = contentToAnalyze.replace(/(\d{3})[\/\-](\d{1,2})[\/\-](\d{1,2})/g, (match, y, m, d) => {
+                    const year = parseInt(y);
+                    if (year < 1911) {
+                        return `${year + 1911}-${m}-${d}`;
+                    }
+                    return match;
+                });
+            }
 
             if (target === 'ledger') {
-                if (isCSV) {
-                    prompt = `Analyze the following CSV/Text data. It is likely Taiwan Cloud Invoice (電子發票) or accounting records. 
-                   Columns often include "交易日期" (Date), "賣方名稱" (Seller), "金額" (Amount), "品名" (Item).
+                prompt = `Analyze the following data. It is likely accounting records or invoices.
                    Ignore header rows.
                    Extract and Map to JSON array:
                    - description: Seller Name or Item Name
-                   - amount: Number (remove currency symbols)
-                   - date: YYYY-MM-DD (Convert Taiwan year 113 -> 2024)
+                   - amount: Number (remove currency symbols, handle commas)
+                   - date: YYYY-MM-DD (If missing year, use current year ${new Date().getFullYear()})
                    - type: 'expense' (default) or 'income' (if strictly implies income)
-                   - category: Choose closest match from [${categories.map((c: any) => c.name).join(', ')}] based on seller/item. (e.g., 7-11 -> 飲食/Daily, Uber -> 交通)
+                   - category: Choose closest match from [${categories.map((c: any) => c.name).join(', ')}] based on seller/item.
                    `;
-                } else {
-                    prompt = `Parse the input into a JSON array of transactions. Fields: date (YYYY-MM-DD, default to today), description, amount (number), type (expense/income), category (choose closest from: ${categories.map((c: any) => c.name).join(',')}).`;
-                }
             } else if (target === 'bank') {
                 prompt = `Parse the input into a JSON array of bank logs. Fields: date (YYYY-MM-DD), description, amount (number), type (in/out). Note: 'in' is deposit/income, 'out' is withdrawal/expense. Infer type from context if possible.`;
             } else if (target === 'card') {
                 prompt = `Parse the input into a JSON array of credit card logs. Fields: date (YYYY-MM-DD), description, amount (number). Note: Amount should be positive number.`;
             }
 
-            const contentToAnalyze = mode === 'image' ? imagePreview! : textInput;
             const res = await callGemini(prompt, contentToAnalyze);
             const json = JSON.parse(res.replace(/```json/g, '').replace(/```/g, ''));
 
             const items = Array.isArray(json) ? json : [json];
             const now = new Date();
             const processed = items.map((it: any) => {
-                // Ensure amount is number
                 let amt = it.amount;
                 if (typeof amt === 'string') {
                     amt = parseFloat(amt.replace(/,/g, ''));
                 }
                 it.amount = amt || 0;
                 
-                // Ensure date is string
                 if (!it.date) it.date = new Date().toISOString().split('T')[0];
 
                 const isDup = checkDuplicate(it);
                 
-                // Anomaly Detection
                 const isFuture = new Date(it.date) > now;
                 const isLarge = it.amount > 100000;
                 const isAnomaly = isFuture || isLarge;
@@ -935,7 +1035,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                 return {
                     ...it,
                     id: Math.random().toString(36).substr(2, 9),
-                    selected: !isDup && !isAnomaly, // Deselect anomalies by default
+                    selected: !isDup && !isAnomaly, 
                     isDuplicate: isDup,
                     isAnomaly: isAnomaly
                 };
