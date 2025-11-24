@@ -601,14 +601,18 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
     const platform = platforms.find((p:any) => p.id === platformId);
     const platformHoldings = holdings.filter((h:any) => h.platformId === platformId);
     
-    // For DRIP calculation
+    // For DRIP calculation logic
     const currentAsset = platformHoldings.find((h:any) => h.symbol === assetSymbol);
     const currentPrice = currentAsset ? (currentAsset.manualPrice || currentAsset.currentPrice) : 0;
-    const dripShares = (type === 'stock' && amount && currentPrice > 0) ? parseFloat(amount) / currentPrice : 0;
+    
+    // Calculate estimated shares for DRIP based on DPS * Quantity
+    const heldShares = currentAsset ? Math.floor(currentAsset.quantity) : 0;
+    const estimatedTotalDividend = (type === 'stock' && amount) ? (parseFloat(amount) * heldShares) : 0;
+    const estimatedNewShares = (estimatedTotalDividend > 0 && currentPrice > 0) ? (estimatedTotalDividend / currentPrice) : 0;
 
     const handleSave = async () => {
         if(!platformId || !amount) return;
-        const val = parseFloat(amount);
+        const inputVal = parseFloat(amount); // DPS if stock, Total if cash
         const payerId = people.find((p: any) => p.isMe || p.uid === userId)?.id || people[0]?.id;
         
         if (type === 'stock') {
@@ -626,13 +630,22 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                     return;
                 }
 
-                // 1. Calculate Shares based on Dividend Amount / Price
-                const newShares = val / price;
+                // 1. Calculate Total Dividend = Shares(floor) * DPS
+                const sharesHeld = Math.floor(holding.quantity);
+                const totalDividend = sharesHeld * inputVal; // inputVal is DPS here
+
+                if (totalDividend <= 0) {
+                    alert('持有股數不足或股息計算為0，無法執行再投資');
+                    return;
+                }
+
+                // 2. Calculate New Shares to Buy
+                const newShares = totalDividend / price;
                 
-                // 2. Update Holding: 
+                // 3. Update Holding: 
                 // New Total Cost = Old Total Cost + Dividend Amount (Reinvested)
                 const oldTotalCost = holding.quantity * holding.avgCost;
-                const newTotalCost = oldTotalCost + val;
+                const newTotalCost = oldTotalCost + totalDividend;
                 const newQty = holding.quantity + newShares;
                 const newAvgCost = newTotalCost / newQty;
 
@@ -641,26 +654,27 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                     avgCost: newAvgCost
                 });
 
-                // 3. Transaction Record
+                // 4. Transaction Record
                 if (addTransaction) {
                     await addDoc(collection(db, getCollectionPath(userId, groupId, 'transactions')), {
-                        totalAmount: val,
-                        description: `股息再投入 (DRIP): ${assetSymbol} (${newShares.toFixed(4)}股)`,
+                        totalAmount: totalDividend,
+                        description: `股息再投入 (DRIP): ${assetSymbol} (DPS:${inputVal} * ${sharesHeld}股 = ${totalDividend} -> ${newShares.toFixed(4)}股)`,
                         category: '投資收益',
                         type: 'income',
                         date: Timestamp.fromDate(new Date(date)),
                         currency: platform?.currency || 'USD',
-                        payers: { [payerId]: val },
-                        splitDetails: { [payerId]: val }
+                        payers: { [payerId]: totalDividend },
+                        splitDetails: { [payerId]: totalDividend }
                     });
                 }
             } else {
                 // --- DRIP LOGIC (Recurring Rule) ---
                 const interval = parseInt(frequency);
                 const nextDate = new Date(date); 
+                // Store DPS in 'amount' field for DRIP rules
                 const ruleData = {
-                    name: `股息再投入: ${assetSymbol}`,
-                    amount: val,
+                    name: `股息再投入 (每股${inputVal}): ${assetSymbol}`,
+                    amount: inputVal, // DPS
                     type: 'income',
                     category: '投資收益',
                     payerId: payerId,
@@ -670,28 +684,28 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                     isDRIP: true,
                     active: true,
                     nextDate: Timestamp.fromDate(nextDate),
-                    payers: { [payerId]: val },
-                    splitDetails: { [payerId]: val }
+                    payers: { [payerId]: inputVal }, // Placeholder, real amount calc at runtime
+                    splitDetails: { [payerId]: inputVal }
                 };
                 await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), ruleData);
             }
 
         } else {
-            // --- CASH DIVIDEND LOGIC ---
+            // --- CASH DIVIDEND LOGIC (Remains Total Amount based) ---
             if (frequency === 'once') {
                 const platformRef = doc(db, getCollectionPath(userId, null, 'platforms'), platformId);
-                await updateDoc(platformRef, { balance: (platform.balance || 0) + val });
+                await updateDoc(platformRef, { balance: (platform.balance || 0) + inputVal });
 
                 if(addTransaction) {
                     await addDoc(collection(db, getCollectionPath(userId, groupId, 'transactions')), {
-                        totalAmount: val,
+                        totalAmount: inputVal,
                         description: `現金股利 (${assetSymbol || 'General'})`,
                         category: '投資收益',
                         type: 'income',
                         date: Timestamp.fromDate(new Date(date)),
                         currency: platform?.currency || 'USD',
-                        payers: { [payerId]: val },
-                        splitDetails: { [payerId]: val }
+                        payers: { [payerId]: inputVal },
+                        splitDetails: { [payerId]: inputVal }
                     });
                 }
             } else {
@@ -700,7 +714,7 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                 const nextDate = new Date(date); 
                 const ruleData = {
                     name: `股利: ${assetSymbol || 'General'}`,
-                    amount: val,
+                    amount: inputVal,
                     type: 'income',
                     category: '投資收益',
                     payerId: payerId,
@@ -709,8 +723,8 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                     linkedPlatformId: platformId,
                     active: true,
                     nextDate: Timestamp.fromDate(nextDate),
-                    payers: { [payerId]: val },
-                    splitDetails: { [payerId]: val }
+                    payers: { [payerId]: inputVal },
+                    splitDetails: { [payerId]: inputVal }
                 };
                 await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), ruleData);
             }
@@ -745,14 +759,24 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                     </div>
                     <div>
                         <label className={styles.label}>
-                            {type === 'stock' ? `股息金額 (${platform?.currency})` : `金額 (${platform?.currency})`}
+                            {type === 'stock' ? `每股股息 DPS (${platform?.currency})` : `股息總金額 (${platform?.currency})`}
                         </label>
                         <input type="number" className={styles.input} value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
                         
                         {type === 'stock' && currentAsset && amount && (
-                            <div className="text-xs text-indigo-600 font-bold mt-1 bg-indigo-50 p-2 rounded-lg flex items-center gap-2 animate-in slide-in-from-top-2">
-                                <RefreshCw size={12} />
-                                以現價 {currentPrice} 計算，約自動買入 {dripShares.toFixed(4)} 股
+                            <div className="text-xs text-indigo-600 font-bold mt-1 bg-indigo-50 p-3 rounded-lg space-y-1 animate-in slide-in-from-top-2">
+                                <div className="flex justify-between">
+                                    <span className="text-slate-500">持有股數(整數):</span>
+                                    <span>{heldShares} 股</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-slate-500">預估總股息:</span>
+                                    <span>{estimatedTotalDividend.toFixed(2)} {platform?.currency}</span>
+                                </div>
+                                <div className="flex justify-between border-t border-indigo-200 pt-1 mt-1">
+                                    <span className="text-slate-500 flex items-center gap-1"><RefreshCw size={10}/> 預估買入:</span>
+                                    <span>{estimatedNewShares.toFixed(4)} 股 (@{currentPrice})</span>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -789,7 +813,7 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                     {frequency !== 'once' && type === 'stock' && (
                         <div className="bg-blue-50 p-3 rounded-xl text-xs text-blue-800 border border-blue-100 flex gap-2">
                             <RefreshCw size={16} className="shrink-0" />
-                            設定為自動 DRIP 後，系統將在時間到達時，以「當時市價」將 {amount} {platform?.currency} 自動買入對應股數。
+                            設定為自動 DRIP 後，系統將在時間到達時，自動以「持有股數x每股股息」算出總額，並以「當時市價」買入。
                         </div>
                     )}
 

@@ -166,6 +166,7 @@ export default function App() {
          if (nextDate.getTime() <= today.getTime()) {
             let transDesc = `${rule.name} (自動)`;
             let shouldUpdateCash = true;
+            let transactionAmount = rule.amount; // Default to fixed amount
 
             // --- DRIP LOGIC ---
             if (rule.isDRIP && rule.linkedHoldingId) {
@@ -176,6 +177,14 @@ export default function App() {
                     
                     if (holdingSnap.exists()) {
                         const h = holdingSnap.data() as AssetHolding;
+                        
+                        // Calculate Dividend based on Shares * DPS
+                        // Rule: Dividend is calculated on whole shares (floor)
+                        const heldShares = Math.floor(h.quantity);
+                        const dividendPerShare = rule.amount; // For DRIP, rule.amount is DPS
+                        const totalDividendAmount = heldShares * dividendPerShare;
+                        transactionAmount = totalDividendAmount; // Update transaction log amount
+
                         let price = h.manualPrice;
                         
                         // Attempt fresh fetch if no manual price
@@ -188,9 +197,9 @@ export default function App() {
                         if (!price || price <= 0) price = h.currentPrice;
                         
                         if (price && price > 0) {
-                            const newShares = rule.amount / price;
+                            const newShares = totalDividendAmount / price;
                             const oldTotalCost = h.quantity * h.avgCost;
-                            const newTotalCost = oldTotalCost + rule.amount;
+                            const newTotalCost = oldTotalCost + totalDividendAmount;
                             const newQty = h.quantity + newShares;
                             const newAvgCost = newTotalCost / newQty;
                             
@@ -200,7 +209,7 @@ export default function App() {
                                 currentPrice: price // Update price too
                             });
                             
-                            transDesc = `股息自動再投入 (DRIP): ${h.symbol} (約${newShares.toFixed(4)}股 @ ${price})`;
+                            transDesc = `股息自動再投入 (DRIP): ${h.symbol} (DPS:${dividendPerShare}, 總額:${totalDividendAmount.toFixed(2)} -> 買入${newShares.toFixed(4)}股 @ ${price})`;
                         } else {
                             transDesc = `股息再投入異常: ${h.symbol} (無法取得股價)`;
                         }
@@ -215,14 +224,14 @@ export default function App() {
 
             // 1. Create Transaction Record
             const newTrans = {
-               totalAmount: rule.amount,
+               totalAmount: transactionAmount,
                description: transDesc,
                category: rule.category,
                type: rule.type,
-               payers: rule.payers || { [rule.payerId]: rule.amount },
-               splitDetails: rule.splitDetails || { [rule.payerId]: rule.amount },
+               payers: rule.payers || { [rule.payerId]: transactionAmount },
+               splitDetails: rule.splitDetails || { [rule.payerId]: transactionAmount },
                date: Timestamp.fromDate(new Date()),
-               currency: 'TWD', // Default currency for logs
+               currency: 'TWD', // Default currency for logs, ideally should match rule/platform currency
                isRecurring: true
             };
             await addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'transactions')), newTrans);

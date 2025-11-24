@@ -82,7 +82,7 @@ export interface Category {
 export interface RecurringRule {
   id: string;
   name: string;
-  amount: number;
+  amount: number; // For DRIP, this represents Dividend Per Share (DPS). For others, it's total amount.
   category: string;
   type: 'expense' | 'income';
   payerId: string;
