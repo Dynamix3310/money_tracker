@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon, FileSpreadsheet, AlertTriangle, CheckSquare, Square, DollarSign } from 'lucide-react';
+import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon, FileSpreadsheet, AlertTriangle, CheckSquare, Square, DollarSign, Clock, Calendar } from 'lucide-react';
 import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog, Transaction, ChatMessage, BankAccount } from '../types';
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc } from 'firebase/firestore';
 import { db, getCollectionPath, auth } from '../services/firebase';
@@ -68,7 +68,7 @@ export const ManageRecurringModal = ({ rules, onClose, onAdd, onEdit, onDelete }
                     <div key={r.id} className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex justify-between items-center">
                         <div>
                             <div className="font-bold text-slate-800 text-sm flex items-center gap-2">{r.name} <span className={`text-[10px] px-1.5 rounded ${r.active ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-500'}`}>{r.active ? '啟用' : '停用'}</span></div>
-                            <div className="text-xs text-slate-400">下次: {r.nextDate?.seconds ? new Date(r.nextDate.seconds * 1000).toLocaleDateString() : 'N/A'} • ${r.amount}</div>
+                            <div className="text-xs text-slate-400">下次: {r.nextDate?.seconds ? new Date(r.nextDate.seconds * 1000).toLocaleDateString() : 'N/A'} • ${r.amount} {r.intervalMonths ? `(每${r.intervalMonths}月)` : '(每月)'}</div>
                         </div>
                         <div className="flex gap-1">
                             <button onClick={() => onEdit(r)} className="p-2 text-slate-400 hover:text-indigo-600"><Edit size={16} /></button>
@@ -597,7 +597,8 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
     const [assetSymbol, setAssetSymbol] = useState('');
     const [amount, setAmount] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-    const [addTransaction, setAddTransaction] = useState(false);
+    const [frequency, setFrequency] = useState<'once' | '1' | '3' | '6' | '12'>('once');
+    const [addTransaction, setAddTransaction] = useState(true);
 
     const platform = platforms.find((p:any) => p.id === platformId);
     const platformHoldings = holdings.filter((h:any) => h.platformId === platformId);
@@ -605,38 +606,56 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
     const handleSave = async () => {
         if(!platformId || !amount) return;
         const val = parseFloat(amount);
+        const payerId = people.find((p: any) => p.isMe || p.uid === userId)?.id || people[0]?.id;
         
-        // 1. Add to Platform Balance
-        const platformRef = doc(db, getCollectionPath(userId, null, 'platforms'), platformId);
-        await updateDoc(platformRef, { balance: (platform.balance || 0) + val });
+        if (frequency === 'once') {
+            // 1. One-time Deposit
+            const platformRef = doc(db, getCollectionPath(userId, null, 'platforms'), platformId);
+            await updateDoc(platformRef, { balance: (platform.balance || 0) + val });
 
-        // 2. Optional: Add Ledger Transaction
-        if(addTransaction) {
-            const payerId = people.find((p: any) => p.isMe || p.uid === userId)?.id || people[0]?.id;
-            const transData = {
-                totalAmount: val, // Ledger is usually base currency, but here we assume user enters TWD equivalent or we might need conversion? 
-                // For simplicity in MVP, assume user enters amount in Ledger's currency (TWD typically) OR we denote currency.
-                // Ledger is base currency (TWD). Platform might be USD.
-                // Ideally we should ask "Amount in Platform Currency" then convert for Ledger.
-                // Let's assume Amount is in Platform Currency, and we check if we need to convert for Ledger?
-                // To keep it simple: Just log it. User can edit later.
-                description: `股利收入 (${assetSymbol || 'General'})`,
-                category: '投資收益',
+            // 2. Optional: Add Ledger Transaction
+            if(addTransaction) {
+                const transData = {
+                    totalAmount: val,
+                    description: `股利收入 (${assetSymbol || 'General'})`,
+                    category: '投資收益', // Assuming this category exists or user is okay with auto-creating/using general
+                    type: 'income',
+                    date: Timestamp.fromDate(new Date(date)),
+                    currency: platform?.currency || 'USD',
+                    payers: { [payerId]: val },
+                    splitDetails: { [payerId]: val }
+                };
+                await addDoc(collection(db, getCollectionPath(userId, groupId, 'transactions')), transData);
+            }
+        } else {
+            // Recurring Rule
+            const interval = parseInt(frequency);
+            const nextDate = new Date(date); // First execution date
+            // We add a new recurring rule
+            const ruleData = {
+                name: `股利: ${assetSymbol || 'General'}`,
+                amount: val,
                 type: 'income',
-                date: Timestamp.fromDate(new Date(date)),
-                currency: platform?.currency || 'USD', // Keep platform currency for reference
+                category: '投資收益',
+                payerId: payerId,
+                frequency: 'custom',
+                intervalMonths: interval,
+                linkedPlatformId: platformId, // This triggers the auto-deposit logic in App.tsx
+                active: true,
+                nextDate: Timestamp.fromDate(nextDate),
                 payers: { [payerId]: val },
                 splitDetails: { [payerId]: val }
             };
-            await addDoc(collection(db, getCollectionPath(userId, groupId, 'transactions')), transData);
+            await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), ruleData);
         }
+        
         onClose();
     };
 
     return (
         <div className={styles.overlay}>
             <div className={styles.content}>
-                <h3 className="font-bold text-xl mb-4">領取股利 / 配息</h3>
+                <h3 className="font-bold text-xl mb-4">領取股利 / 配息設定</h3>
                 <div className="space-y-4">
                     <div>
                         <label className={styles.label}>入帳平台</label>
@@ -656,18 +675,38 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                         <input type="number" className={styles.input} value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
                     </div>
                     <div>
-                        <label className={styles.label}>入帳日期</label>
+                        <label className={styles.label}>入帳日期 (或首次執行日)</label>
                         <input type="date" className={styles.input} value={date} onChange={e => setDate(e.target.value)} />
                     </div>
                     
-                    <div className="flex items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100">
-                        <input type="checkbox" id="addTrans" checked={addTransaction} onChange={e => setAddTransaction(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500" />
-                        <label htmlFor="addTrans" className="text-sm font-bold text-indigo-700 cursor-pointer select-none">同步新增至記帳 (收入)</label>
+                    <div>
+                        <label className={styles.label}>領取週期</label>
+                        <div className="grid grid-cols-3 gap-2">
+                            <button onClick={() => setFrequency('once')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === 'once' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>單次領取</button>
+                            <button onClick={() => setFrequency('1')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '1' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每月</button>
+                            <button onClick={() => setFrequency('3')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '3' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每季 (3月)</button>
+                            <button onClick={() => setFrequency('6')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '6' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每半年</button>
+                            <button onClick={() => setFrequency('12')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '12' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每年</button>
+                        </div>
                     </div>
+
+                    {frequency === 'once' && (
+                        <div className="flex items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100">
+                            <input type="checkbox" id="addTrans" checked={addTransaction} onChange={e => setAddTransaction(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500" />
+                            <label htmlFor="addTrans" className="text-sm font-bold text-indigo-700 cursor-pointer select-none">同步新增至記帳 (收入)</label>
+                        </div>
+                    )}
+                    
+                    {frequency !== 'once' && (
+                        <div className="bg-amber-50 p-3 rounded-xl text-xs text-amber-800 border border-amber-100 flex gap-2">
+                            <Clock size={16} className="shrink-0" />
+                            設定為固定收支後，系統將在時間到達時自動增加平台餘額並記錄收入。
+                        </div>
+                    )}
 
                     <div className="flex gap-3 pt-2">
                         <button onClick={onClose} className={styles.btnSecondary}>取消</button>
-                        <button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認領取</button>
+                        <button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認{frequency === 'once' ? '領取' : '設定'}</button>
                     </div>
                 </div>
             </div>
@@ -856,7 +895,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                    Extract and Map to JSON array:
                    - description: Seller Name or Item Name
                    - amount: Number (remove currency symbols)
-                   - date: YYYY-MM-DD
+                   - date: YYYY-MM-DD (Convert Taiwan year 113 -> 2024)
                    - type: 'expense' (default) or 'income' (if strictly implies income)
                    - category: Choose closest match from [${categories.map((c: any) => c.name).join(', ')}] based on seller/item. (e.g., 7-11 -> 飲食/Daily, Uber -> 交通)
                    `;
@@ -877,7 +916,12 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
             const now = new Date();
             const processed = items.map((it: any) => {
                 // Ensure amount is number
-                it.amount = parseFloat(it.amount) || 0;
+                let amt = it.amount;
+                if (typeof amt === 'string') {
+                    amt = parseFloat(amt.replace(/,/g, ''));
+                }
+                it.amount = amt || 0;
+                
                 // Ensure date is string
                 if (!it.date) it.date = new Date().toISOString().split('T')[0];
 

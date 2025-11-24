@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
-import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock } from 'lucide-react';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment } from 'firebase/firestore';
+import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock, BellRing } from 'lucide-react';
 import { auth, db, getCollectionPath, getUserProfilePath } from './services/firebase';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
 import { ADMIN_EMAILS } from './services/gemini';
@@ -32,6 +32,7 @@ export default function App() {
    const [user, setUser] = useState<User | null>(null);
    const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
    const [loading, setLoading] = useState(true);
+   const [notification, setNotification] = useState<string | null>(null);
 
    // App State
    const [activeTab, setActiveTab] = useState<'home' | 'invest' | 'ledger' | 'cash'>('home');
@@ -74,12 +75,16 @@ export default function App() {
       if (source === 'shortcut-add') {
           setActiveTab('ledger');
           setActiveModal('add-trans');
+          setNotification("已透過捷徑快速啟動：記一筆");
+          setTimeout(() => setNotification(null), 4000);
           // Clean URL
           window.history.replaceState({}, '', '/');
       } else if (source === 'shortcut-scan') {
           setActiveTab('ledger');
           setBatchConfig({ target: 'ledger' });
           setActiveModal('ai-batch');
+          setNotification("已透過捷徑快速啟動：掃描發票");
+          setTimeout(() => setNotification(null), 4000);
           window.history.replaceState({}, '', '/');
       }
 
@@ -158,6 +163,7 @@ export default function App() {
          nextDate.setHours(0, 0, 0, 0);
 
          if (nextDate.getTime() <= today.getTime()) {
+            // 1. Create Transaction Record
             const newTrans = {
                totalAmount: rule.amount,
                description: `${rule.name} (自動)`,
@@ -166,13 +172,25 @@ export default function App() {
                payers: rule.payers || { [rule.payerId]: rule.amount },
                splitDetails: rule.splitDetails || { [rule.payerId]: rule.amount },
                date: Timestamp.fromDate(new Date()),
-               currency: 'TWD',
+               currency: 'TWD', // Default to Ledger currency for the transaction log
                isRecurring: true
             };
             await addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'transactions')), newTrans);
+
+            // 2. If linked to a platform, auto-update balance (Atomic increment)
+            if (rule.linkedPlatformId) {
+                const platformRef = doc(db, getCollectionPath(user!.uid, null, 'platforms'), rule.linkedPlatformId);
+                await updateDoc(platformRef, {
+                    balance: increment(rule.amount) // rule.amount is positive, so adds to balance
+                });
+            }
+
+            // 3. Update Next Execution Date
+            const interval = rule.intervalMonths || 1;
             const nextMonth = new Date(nextDate);
-            nextMonth.setMonth(nextMonth.getMonth() + 1);
-            await updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'recurring')), {
+            nextMonth.setMonth(nextMonth.getMonth() + interval);
+            
+            await updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'recurring'), rule.id), {
                nextDate: Timestamp.fromDate(nextMonth)
             });
          }
@@ -379,6 +397,12 @@ export default function App() {
 
    return (
       <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden relative">
+         {notification && (
+             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/90 text-white px-4 py-2 rounded-full shadow-xl text-sm font-bold flex items-center gap-2 animate-in slide-in-from-top-2 fade-in">
+                 <BellRing size={16} className="text-indigo-400" /> {notification}
+             </div>
+         )}
+
          <header className="bg-slate-900 text-white pb-2 pt-safe z-20 shadow-md">
             {/* Branding Row */}
             <div className="px-4 pt-4 pb-2 flex justify-between items-center border-b border-slate-800/50">

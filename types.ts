@@ -87,7 +87,9 @@ export interface RecurringRule {
   type: 'expense' | 'income';
   payerId: string;
   nextDate: any;
-  frequency: 'monthly';
+  frequency: 'monthly' | 'custom';
+  intervalMonths?: number; // 1=Monthly, 3=Quarterly, 12=Annually
+  linkedPlatformId?: string; // If set, adds amount to this platform's balance automatically
   active: boolean;
   payers?: Record<string, number>;
   splitDetails?: Record<string, number>;
