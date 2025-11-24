@@ -1,15 +1,15 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment } from 'firebase/firestore';
-import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock, BellRing } from 'lucide-react';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment, where } from 'firebase/firestore';
+import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock, BellRing, ChevronDown } from 'lucide-react';
 import { auth, db, getCollectionPath, getUserProfilePath } from './services/firebase';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
 import { ADMIN_EMAILS } from './services/gemini';
 import { ExpensePieChart, CashFlowBarChart, NetWorthAreaChart } from './components/Charts';
 import { SettingsModal, SellAssetModal, AddTransactionModal, AddAssetModal, AddAccountModal, AddCardModal, BankDetailModal, AIAssistantModal, CardDetailModal, TransferModal, EditAssetModal, ConfirmActionModal, AddPlatformModal, ManagePlatformCashModal, ManageListModal, AddRecurringModal, ManageRecurringModal, AIBatchImportModal, EditAssetPriceModal, AddDividendModal, PortfolioRebalanceModal } from './components/Modals';
 import { PortfolioView, LedgerView, CashView } from './components/Views';
-import { AssetHolding, Platform, BankAccount, BankTransaction, CreditCardInfo, CreditCardLog, Transaction, Person, Category, RecurringRule, NetWorthHistory } from './types';
+import { AssetHolding, Platform, BankAccount, BankTransaction, CreditCardInfo, CreditCardLog, Transaction, Person, Category, RecurringRule, NetWorthHistory, Group } from './types';
 import { AuthScreen } from './components/Auth';
 
 const CURRENCY_SYMBOLS: Record<string, string> = { 'TWD': 'NT$', 'USD': '$', 'JPY': '¥', 'EUR': '€', 'CNY': '¥' };
@@ -31,6 +31,7 @@ const safeDate = (dateObj: any) => {
 export default function App() {
    const [user, setUser] = useState<User | null>(null);
    const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
+   const [userGroups, setUserGroups] = useState<Group[]>([]);
    const [loading, setLoading] = useState(true);
    const [notification, setNotification] = useState<string | null>(null);
 
@@ -99,11 +100,11 @@ export default function App() {
       return unsubscribe;
    }, []);
 
-   // Listen to User Profile for Group Changes
+   // Listen to User Profile for Group Changes and User Groups
    useEffect(() => {
       if (!user || !db) return;
 
-      // Subscribe to user profile changes to sync currentGroupId
+      // 1. Sync currentGroupId from User Profile
       const unsubProfile = onSnapshot(doc(db, getUserProfilePath(user.uid)), (docSnap) => {
          if (docSnap.exists()) {
             const data = docSnap.data();
@@ -116,7 +117,18 @@ export default function App() {
          }
       });
 
-      return () => unsubProfile();
+      // 2. Fetch all groups where user is a member
+      const groupsQuery = query(
+          collection(db, 'artifacts/wealthflow-stable-restore/groups'), 
+          where('members', 'array-contains', user.uid)
+      );
+      
+      const unsubGroups = onSnapshot(groupsQuery, (snap) => {
+          const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Group[];
+          setUserGroups(list);
+      });
+
+      return () => { unsubProfile(); unsubGroups(); };
    }, [user]);
 
    // Auto Fetch Rates
@@ -421,6 +433,56 @@ export default function App() {
       }
    };
 
+   const handleCreateGroup = async (name: string) => {
+       if (!user || !name) return;
+       try {
+           // 1. Create Group Document
+           const groupsCol = collection(db, 'artifacts/wealthflow-stable-restore/groups');
+           const newGroupRef = await addDoc(groupsCol, {
+               name: name,
+               ownerId: user.uid,
+               createdAt: serverTimestamp(),
+               members: [user.uid]
+           });
+
+           // 2. Initialize default categories
+           const cats = ['飲食','交通','購物','娛樂','居住'];
+           const catCol = collection(db, getCollectionPath(user.uid, newGroupRef.id, 'categories'));
+           for(const c of cats) await addDoc(catCol, { name: c, type: 'expense' });
+           await addDoc(catCol, { name: '薪水', type: 'income' });
+
+           // 3. Add current user as Person
+           const peopleCol = collection(db, getCollectionPath(user.uid, newGroupRef.id, 'people'));
+           await addDoc(peopleCol, {
+                name: user.displayName || user.email?.split('@')[0] || 'Me',
+                isMe: true,
+                uid: user.uid,
+                email: user.email
+           });
+
+           // 4. Switch to new group
+           await updateDoc(doc(db, getUserProfilePath(user.uid)), {
+                currentGroupId: newGroupRef.id
+           });
+
+           alert('新帳本建立成功！');
+       } catch (e) {
+           console.error(e);
+           alert('建立失敗');
+       }
+   };
+
+   const handleSwitchGroup = async (groupId: string) => {
+       if (!user || !groupId) return;
+       try {
+           await updateDoc(doc(db, getUserProfilePath(user.uid)), {
+               currentGroupId: groupId
+           });
+       } catch (e) {
+           console.error("Switch failed", e);
+       }
+   };
+
    // Main Render Logic
    if (!auth) return <div className="h-screen flex items-center justify-center flex-col gap-4 text-slate-600"><div className="text-xl font-bold">Configuration Error</div><div className="text-sm">Firebase API Key not found in environment variables.</div></div>;
 
@@ -454,6 +516,8 @@ export default function App() {
       );
    }
 
+   const currentGroupName = userGroups.find(g => g.id === currentGroupId)?.name || '載入中...';
+
    return (
       <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden relative">
          {notification && (
@@ -478,9 +542,21 @@ export default function App() {
 
             {/* Controls Row */}
             <div className="px-4 py-2 flex justify-between items-center text-xs text-slate-400 border-b border-slate-800">
-               <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">{currentGroupId === user.uid ? '個人帳本' : '群組帳本'}</span>
-                  <select value={baseCurrency} onChange={e => setBaseCurrency(e.target.value)} className="bg-slate-800 rounded px-2 py-0.5 text-white text-xs outline-none border border-slate-700 focus:border-indigo-500">
+               <div className="flex items-center gap-2 w-full">
+                  <div className="relative max-w-[60%]">
+                      <select 
+                        value={currentGroupId || ''} 
+                        onChange={(e) => handleSwitchGroup(e.target.value)}
+                        className="appearance-none bg-slate-800 border border-slate-700 text-white py-1 pl-3 pr-8 rounded-lg text-xs font-bold outline-none w-full truncate focus:border-indigo-500 transition-colors"
+                      >
+                          {userGroups.map(g => (
+                              <option key={g.id} value={g.id}>{g.name} {g.id === user.uid ? '(個人)' : ''}</option>
+                          ))}
+                      </select>
+                      <ChevronDown size={12} className="absolute right-2 top-1.5 text-slate-400 pointer-events-none"/>
+                  </div>
+                  <div className="flex-1"></div>
+                  <select value={baseCurrency} onChange={e => setBaseCurrency(e.target.value)} className="bg-slate-800 rounded px-2 py-1 text-white text-xs outline-none border border-slate-700 focus:border-indigo-500">
                      {ALLOWED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                </div>
@@ -521,8 +597,8 @@ export default function App() {
          </nav>
 
          {/* Modals */}
-         {activeModal === 'settings' && <SettingsModal onClose={() => setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} currentGroupId={currentGroupId} categories={categories} onAddCategory={(name: string, type: string, budget: number) => addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'categories')), { name, type, budgetLimit: budget || 0 })} onDeleteCategory={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id)), '確定刪除此分類? (需二次確認)')} />}
-         {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal(null); setSelectedItem(null) }} editData={selectedItem} />}
+         {activeModal === 'settings' && <SettingsModal onClose={() => setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} onGroupCreate={handleCreateGroup} onGroupSwitch={handleSwitchGroup} currentGroupId={currentGroupId} groups={userGroups} user={user} categories={categories} onAddCategory={(name: string, type: string, budget: number) => addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'categories')), { name, type, budgetLimit: budget || 0 })} onDeleteCategory={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id)), '確定刪除此分類? (需二次確認)')} />}
+         {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal(null); setSelectedItem(null) }} editData={selectedItem} rates={rates} convert={convert} />}
 
          {activeModal === 'ai-batch' && <AIBatchImportModal initialConfig={batchConfig} userId={user?.uid} groupId={currentGroupId} categories={categories} existingTransactions={transactions} accounts={accounts} creditCards={creditCards} existingBankLogs={bankLogs} existingCardLogs={cardLogs} people={people} onClose={() => { setActiveModal(null); setBatchConfig(null); }} />}
 
@@ -553,7 +629,7 @@ export default function App() {
 
          {activeModal === 'transfer' && <TransferModal userId={user?.uid} accounts={calculatedAccounts} onClose={() => setActiveModal(null)} />}
          {activeModal === 'view-bank' && selectedItem && <BankDetailModal userId={user?.uid} account={selectedItem} logs={bankLogs.filter(l => l.accountId === selectedItem.id)} onClose={() => { setActiveModal(null); setSelectedItem(null) }} onImport={() => { setBatchConfig({ target: 'bank', targetId: selectedItem.id }); setActiveModal('ai-batch'); }} />}
-         {activeModal === 'view-card' && selectedItem && <CardDetailModal userId={user?.uid} card={selectedItem} cardLogs={cardLogs.filter(l => l.cardId === selectedItem.id)} allCardLogs={cardLogs} transactions={transactions} onClose={() => { setActiveModal(null); setSelectedItem(null) }} />}
+         {activeModal === 'view-card' && selectedItem && <CardDetailModal userId={user?.uid} card={selectedItem} cardLogs={cardLogs.filter(l => l.cardId === selectedItem.id)} allCardLogs={cardLogs} transactions={transactions} onClose={() => { setActiveModal(null); setSelectedItem(null) }} groups={userGroups} currentGroupId={currentGroupId} />}
          {showAI && <AIAssistantModal onClose={() => setShowAI(false)} contextData={{ totalNetWorth, holdings, transactions }} />}
          {confirmData && <ConfirmActionModal title={confirmData.title} message={confirmData.message} onConfirm={confirmData.action} onCancel={() => setConfirmData(null)} />}
       </div>

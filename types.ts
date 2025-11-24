@@ -60,6 +60,7 @@ export interface CreditCardLog {
   description: string;
   isReconciled: boolean;
   linkedTransactionId?: string;
+  linkedGroupId?: string; // Added for cross-ledger linking
 }
 
 export interface Transaction {
@@ -69,7 +70,10 @@ export interface Transaction {
   category: string;
   type: 'expense' | 'income';
   totalAmount: number;
-  currency: string;
+  currency: string; // The currency of totalAmount (usually Ledger Base)
+  sourceAmount?: number; // Original amount if different currency
+  sourceCurrency?: string; // Original currency
+  exchangeRate?: number; // Rate used for conversion
   payers: Record<string, number>;
   splitDetails: Record<string, number>;
   isRecurring?: boolean;
@@ -131,6 +135,13 @@ export interface UserProfile {
   email: string;
   currentGroupId: string;
   name?: string;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  ownerId: string;
+  members: string[];
 }
 
 export interface PortfolioTarget {
