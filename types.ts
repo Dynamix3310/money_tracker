@@ -6,6 +6,7 @@ export interface AssetHolding {
   quantity: number;
   avgCost: number;
   currentPrice: number;
+  manualPrice?: number; // User overridden price
   currency: string;
   type: 'stock' | 'crypto';
 }

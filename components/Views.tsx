@@ -1,11 +1,11 @@
 
 import React, { useState, useMemo } from 'react';
-import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal, FileSpreadsheet } from 'lucide-react';
+import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal, FileSpreadsheet, Coins } from 'lucide-react';
 import { AssetHolding, Transaction, BankAccount, CreditCardInfo, Person, BankTransaction, CreditCardLog, Platform } from '../types';
 import { ExpensePieChart } from './Charts';
 
 // --- Portfolio View ---
-export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlatform, onManageCash, onAddAsset, onSell, onEdit, onUpdatePrices, baseCurrency, rates, convert, CURRENCY_SYMBOLS }: any) => {
+export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlatform, onManageCash, onAddAsset, onSell, onEdit, onUpdatePrices, onDividend, baseCurrency, rates, convert, CURRENCY_SYMBOLS }: any) => {
    const groupedData = useMemo(() => {
        const map: Record<string, AssetHolding[]> = {};
        platforms.forEach((p: Platform) => map[p.id] = []);
@@ -17,20 +17,29 @@ export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlat
       <div className="space-y-6 animate-in slide-in-from-bottom-4 pb-20">
          <div className="flex justify-between items-center">
             <div className="flex items-center gap-2"> <h3 className="font-bold text-lg text-slate-800">投資組合</h3> <button onClick={onManagePlatform} className="text-slate-300 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><Settings size={16}/></button> </div>
-            <div className="flex gap-2"> <button onClick={onUpdatePrices} className="bg-white border border-slate-200 text-slate-600 p-2 rounded-lg shadow-sm hover:bg-slate-50 active:scale-95 transition-all"><RefreshCw size={16}/></button> <button onClick={onAddPlatform} className="bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-slate-200"><Building2 size={14}/> 平台</button> <button onClick={onAddAsset} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-indigo-700 transition-colors"><Plus size={14}/> 資產</button> </div>
+            <div className="flex gap-2"> 
+                <button onClick={onUpdatePrices} className="bg-white border border-slate-200 text-slate-600 p-2 rounded-lg shadow-sm hover:bg-slate-50 active:scale-95 transition-all" title="更新股價"><RefreshCw size={16}/></button> 
+                <button onClick={onDividend} className="bg-emerald-50 border border-emerald-100 text-emerald-600 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-emerald-100" title="領取股利"><Coins size={14}/> 股利</button> 
+                <button onClick={onAddPlatform} className="bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-slate-200"><Building2 size={14}/> 平台</button> 
+                <button onClick={onAddAsset} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-indigo-700 transition-colors"><Plus size={14}/> 資產</button> 
+            </div>
          </div>
          {platforms.length === 0 && holdings.length === 0 && ( <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-2xl"><div className="text-slate-400 font-medium">尚無投資平台或資產</div></div> )}
          {platforms.map((p: Platform) => {
              const assets = groupedData[p.id] || [];
-             const assetsVal = assets.reduce((sum, h) => sum + (h.quantity * h.currentPrice), 0);
+             const assetsVal = assets.reduce((sum, h) => sum + (h.quantity * (h.manualPrice ?? h.currentPrice)), 0);
              const totalValNative = p.balance + assetsVal;
              const totalValBase = convert(totalValNative, p.currency, baseCurrency, rates);
-             const pieData = [ ...assets.map(h => ({ name: h.symbol, value: h.quantity * h.currentPrice })), { name: '現金', value: p.balance } ].filter(x => x.value > 0);
+             const pieData = [ ...assets.map(h => ({ name: h.symbol, value: h.quantity * (h.manualPrice ?? h.currentPrice) })), { name: '現金', value: p.balance } ].filter(x => x.value > 0);
              return (
                  <div key={p.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex justify-between items-start"> <div> <div className="font-bold text-slate-800 flex items-center gap-2 text-base">{p.name} <span className="text-[10px] bg-slate-200 px-1.5 rounded text-slate-600">{p.currency}</span></div> <div className="text-xs text-slate-400 mt-1">總值 (估算): {CURRENCY_SYMBOLS[baseCurrency]}{Math.round(totalValBase).toLocaleString()}</div> </div> <button onClick={() => onManageCash(p)} className="bg-white border border-emerald-200 text-emerald-600 px-2 py-1 rounded text-[10px] font-bold shadow-sm flex items-center gap-1"><DollarSign size={10}/> 現金: {p.balance.toLocaleString()}</button> </div>
                      {pieData.length > 0 && ( <div className="h-32 w-full bg-white border-b border-slate-50"> <ExpensePieChart data={pieData} /> </div> )}
-                     <div> {assets.length === 0 ? <div className="p-4 text-center text-xs text-slate-300">此平台尚無持倉</div> : assets.map((h: AssetHolding) => { const pnlPercent = h.avgCost > 0 ? ((h.currentPrice - h.avgCost) / h.avgCost) * 100 : 0; const pnlValue = (h.currentPrice - h.avgCost) * h.quantity; return ( <div key={h.id} className="p-4 border-b border-slate-50 last:border-0 flex justify-between items-center hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => onEdit(h)}> <div> <div className="font-bold text-slate-800 flex items-center gap-2"> {h.symbol} <span className={`text-[9px] px-1 rounded font-bold ${h.type==='crypto'?'bg-orange-100 text-orange-600':'bg-blue-100 text-blue-600'}`}>{h.type==='crypto'?'C':'S'}</span> </div> <div className="text-xs text-slate-400 mt-0.5">{h.quantity} • Avg {h.avgCost}</div> </div> <div className="flex items-center gap-4"> <div className="text-right"> <div className="font-bold text-slate-800 text-sm">{h.currentPrice} {h.currency}</div> <div className={`text-[10px] font-bold flex items-center justify-end gap-1 ${pnlPercent>=0?'text-emerald-600':'text-red-500'}`}> <span>{pnlPercent>=0?'+':''}{Math.round(pnlValue).toLocaleString()}</span> <span className="opacity-70">({pnlPercent.toFixed(1)}%)</span> </div> </div> <button onClick={(e) => { e.stopPropagation(); onSell(h); }} className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg text-xs font-bold hover:bg-indigo-100">賣出</button> </div> </div> ); })} </div>
+                     <div> {assets.length === 0 ? <div className="p-4 text-center text-xs text-slate-300">此平台尚無持倉</div> : assets.map((h: AssetHolding) => { 
+                         const displayPrice = h.manualPrice ?? h.currentPrice;
+                         const pnlPercent = h.avgCost > 0 ? ((displayPrice - h.avgCost) / h.avgCost) * 100 : 0; 
+                         const pnlValue = (displayPrice - h.avgCost) * h.quantity; 
+                         return ( <div key={h.id} className="p-4 border-b border-slate-50 last:border-0 flex justify-between items-center hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => onEdit(h)}> <div> <div className="font-bold text-slate-800 flex items-center gap-2"> {h.symbol} <span className={`text-[9px] px-1 rounded font-bold ${h.type==='crypto'?'bg-orange-100 text-orange-600':'bg-blue-100 text-blue-600'}`}>{h.type==='crypto'?'C':'S'}</span> </div> <div className="text-xs text-slate-400 mt-0.5">{h.quantity} • Avg {h.avgCost}</div> </div> <div className="flex items-center gap-4"> <div className="text-right"> <div className="font-bold text-slate-800 text-sm flex items-center justify-end gap-1">{displayPrice} <span className="text-[10px] font-normal text-slate-400">{h.currency}</span> {h.manualPrice && <span className="w-1.5 h-1.5 bg-orange-400 rounded-full" title="手動報價"></span>}</div> <div className={`text-[10px] font-bold flex items-center justify-end gap-1 ${pnlPercent>=0?'text-emerald-600':'text-red-500'}`}> <span>{pnlPercent>=0?'+':''}{Math.round(pnlValue).toLocaleString()}</span> <span className="opacity-70">({pnlPercent.toFixed(1)}%)</span> </div> </div> <button onClick={(e) => { e.stopPropagation(); onSell(h); }} className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg text-xs font-bold hover:bg-indigo-100">賣出</button> </div> </div> ); })} </div>
                  </div>
              )
          })}

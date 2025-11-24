@@ -7,7 +7,7 @@ import { auth, db, getCollectionPath, getUserProfilePath } from './services/fire
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
 import { ADMIN_EMAILS } from './services/gemini';
 import { ExpensePieChart, CashFlowBarChart, NetWorthAreaChart } from './components/Charts';
-import { SettingsModal, SellAssetModal, AddTransactionModal, AddAssetModal, AddAccountModal, AddCardModal, BankDetailModal, AIAssistantModal, CardDetailModal, TransferModal, EditAssetModal, ConfirmActionModal, AddPlatformModal, ManagePlatformCashModal, ManageListModal, AddRecurringModal, ManageRecurringModal, AIBatchImportModal } from './components/Modals';
+import { SettingsModal, SellAssetModal, AddTransactionModal, AddAssetModal, AddAccountModal, AddCardModal, BankDetailModal, AIAssistantModal, CardDetailModal, TransferModal, EditAssetModal, ConfirmActionModal, AddPlatformModal, ManagePlatformCashModal, ManageListModal, AddRecurringModal, ManageRecurringModal, AIBatchImportModal, EditAssetPriceModal, AddDividendModal } from './components/Modals';
 import { PortfolioView, LedgerView, CashView } from './components/Views';
 import { AssetHolding, Platform, BankAccount, BankTransaction, CreditCardInfo, CreditCardLog, Transaction, Person, Category, RecurringRule, NetWorthHistory } from './types';
 import { AuthScreen } from './components/Auth';
@@ -66,8 +66,23 @@ export default function App() {
       holdingsRef.current = holdings;
    }, [holdings]);
 
-   // Safe Check for Firebase Auth
+   // Handle PWA Shortcuts and Auth
    useEffect(() => {
+      // Check for shortcut params
+      const params = new URLSearchParams(window.location.search);
+      const source = params.get('source');
+      if (source === 'shortcut-add') {
+          setActiveTab('ledger');
+          setActiveModal('add-trans');
+          // Clean URL
+          window.history.replaceState({}, '', '/');
+      } else if (source === 'shortcut-scan') {
+          setActiveTab('ledger');
+          setBatchConfig({ target: 'ledger' });
+          setActiveModal('ai-batch');
+          window.history.replaceState({}, '', '/');
+      }
+
       if (!auth) {
          setLoading(false);
          return;
@@ -124,7 +139,13 @@ export default function App() {
    // Check Recurring Rules
    useEffect(() => {
       if (!user || recurringRules.length === 0) return;
-      checkRecurringRules();
+      const interval = setInterval(() => {
+         checkRecurringRules();
+      }, 60 * 60 * 1000); // Check every hour
+      
+      checkRecurringRules(); // Also check on load
+
+      return () => clearInterval(interval);
    }, [recurringRules, user]);
 
    const checkRecurringRules = async () => {
@@ -203,7 +224,11 @@ export default function App() {
    }), [accounts, bankLogs]);
 
    const totalNetWorth = useMemo(() => {
-      const investVal = holdings.reduce((acc, h) => acc + convert(h.quantity * h.currentPrice, h.currency, baseCurrency, rates), 0);
+      const investVal = holdings.reduce((acc, h) => {
+          // Priority: Manual Price > Current Price
+          const price = h.manualPrice ?? h.currentPrice;
+          return acc + convert(h.quantity * price, h.currency, baseCurrency, rates);
+      }, 0);
       const platformCashVal = platforms.reduce((acc, p) => acc + convert(p.balance, p.currency, baseCurrency, rates), 0);
       const cashVal = calculatedAccounts.reduce((acc, a) => acc + convert(a.currentBalance || 0, a.currency, baseCurrency, rates), 0);
       return investVal + platformCashVal + cashVal;
@@ -220,10 +245,19 @@ export default function App() {
       const currentKey = localStorage.getItem('finnhub_key') || '';
 
       for (const h of currentHoldings) {
+         // Skip if user set a manual price override, unless we want to background update?
+         // Let's background update 'currentPrice' anyway so if they toggle manual off, it's fresh.
+         // But we don't want to overwrite 'manualPrice'.
+         
          let price = null;
          if (h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
          else { price = await fetchStockPrice(h.symbol, currentKey); if (!price) errors.push(h.symbol); }
-         if (price) { await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price }); updated++; }
+         
+         if (price) { 
+             // Only update currentPrice, leave manualPrice alone
+             await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price }); 
+             updated++; 
+         }
       }
       if (showFeedback && errors.length > 0) alert(`更新完成，但部分失敗: ${errors.join(', ')}`);
       else if (showFeedback) alert(`成功更新 ${updated} 筆資產價格`);
@@ -383,7 +417,7 @@ export default function App() {
                      <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64"><h3 className="font-bold text-slate-700 text-sm mb-4 flex items-center gap-2"><TrendingUp size={16} /> 收支分析</h3><CashFlowBarChart data={getMonthlyCashFlow(transactions, baseCurrency, rates)} /></div>
                   </div>
                )}
-               {activeTab === 'invest' && <PortfolioView holdings={holdings} platforms={platforms} onAddPlatform={() => setActiveModal('add-platform')} onManagePlatform={() => setActiveModal('manage-platforms')} onManageCash={(p: any) => { setSelectedItem(p); setActiveModal('manage-cash') }} onAddAsset={() => setActiveModal('add-asset')} onUpdatePrices={() => updateAssetPrices(true)} onEdit={(h: any) => { setSelectedItem(h); setActiveModal('edit-asset') }} onSell={(h: any) => { setSelectedItem(h); setActiveModal('sell') }} baseCurrency={baseCurrency} rates={rates} convert={convert} CURRENCY_SYMBOLS={CURRENCY_SYMBOLS} />}
+               {activeTab === 'invest' && <PortfolioView holdings={holdings} platforms={platforms} onAddPlatform={() => setActiveModal('add-platform')} onManagePlatform={() => setActiveModal('manage-platforms')} onManageCash={(p: any) => { setSelectedItem(p); setActiveModal('manage-cash') }} onAddAsset={() => setActiveModal('add-asset')} onUpdatePrices={() => updateAssetPrices(true)} onEdit={(h: any) => { setSelectedItem(h); setActiveModal('edit-asset-price') }} onSell={(h: any) => { setSelectedItem(h); setActiveModal('sell') }} onDividend={() => setActiveModal('add-dividend')} baseCurrency={baseCurrency} rates={rates} convert={convert} CURRENCY_SYMBOLS={CURRENCY_SYMBOLS} />}
                {activeTab === 'ledger' && <LedgerView transactions={transactions} categories={categories} people={people} cardLogs={cardLogs} onAdd={() => setActiveModal('add-trans')} onEdit={(t: any) => { setSelectedItem(t); setActiveModal('edit-trans') }} currentGroupId={currentGroupId} userId={user?.uid} onDelete={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'transactions'), id)), '確定刪除此筆記帳資料?')} onManageRecurring={() => setActiveModal('manage-recurring')} onBatchAdd={() => setActiveModal('ai-batch')} />}
                {activeTab === 'cash' && <CashView accounts={calculatedAccounts} creditCards={creditCards} onTransfer={() => setActiveModal('transfer')} onAddAccount={() => setActiveModal('add-account')} onManageAccount={() => setActiveModal('manage-accounts')} onAddCard={() => setActiveModal('add-card')} onManageCard={() => setActiveModal('manage-cards')} onViewAccount={(acc: any) => { setSelectedItem(acc); setActiveModal('view-bank') }} onViewCard={(card: any) => { setSelectedItem(card); setActiveModal('view-card') }} />}
             </div>
@@ -418,8 +452,13 @@ export default function App() {
          {activeModal === 'manage-platforms' && <ManageListModal title="管理投資平台" items={platforms} onClose={() => setActiveModal(null)} renderItem={(p: any) => (<div><div className="font-bold">{p.name}</div><div className="text-xs text-slate-500">{p.currency} • {p.type}</div></div>)} onEdit={(p: any) => { setSelectedItem(p); setActiveModal('edit-platform') }} onDelete={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'platforms'), id)), `確定刪除平台? (相關資產需手動整理)`)} />}
          {activeModal === 'manage-cash' && selectedItem && <ManagePlatformCashModal platform={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null) }} />}
          {activeModal === 'add-asset' && <AddAssetModal userId={user?.uid} platforms={platforms} onClose={() => setActiveModal(null)} />}
+         
          {activeModal === 'edit-asset' && selectedItem && <EditAssetModal holding={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null) }} onDelete={(h: any) => confirmDelete(async () => { await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'holdings'), h.id)); setActiveModal(null) }, '確定刪除此資產? (需二次確認)')} />}
+         {/* New Modal for Price Edit */}
+         {activeModal === 'edit-asset-price' && selectedItem && <EditAssetPriceModal holding={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null) }} onEditInfo={() => setActiveModal('edit-asset')} onSell={() => setActiveModal('sell')} />}
+         
          {activeModal === 'sell' && selectedItem && <SellAssetModal holding={selectedItem} onClose={() => { setActiveModal(null); setSelectedItem(null) }} onConfirm={handleSellAsset} />}
+         {activeModal === 'add-dividend' && <AddDividendModal userId={user?.uid} groupId={currentGroupId} platforms={platforms} holdings={holdings} people={people} onClose={() => setActiveModal(null)} />}
 
          {/* Bank & Card Modals */}
          {(activeModal === 'add-account' || activeModal === 'edit-account') && <AddAccountModal userId={user?.uid} onClose={() => { setActiveModal(activeModal === 'edit-account' ? 'manage-accounts' : null); setSelectedItem(null) }} editData={selectedItem} />}

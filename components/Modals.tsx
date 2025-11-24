@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon, FileSpreadsheet, AlertTriangle, CheckSquare, Square } from 'lucide-react';
+import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon, FileSpreadsheet, AlertTriangle, CheckSquare, Square, DollarSign } from 'lucide-react';
 import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog, Transaction, ChatMessage, BankAccount } from '../types';
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc } from 'firebase/firestore';
 import { db, getCollectionPath, auth } from '../services/firebase';
@@ -536,6 +536,145 @@ export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
     return (<div className={styles.overlay}><div className={styles.content}> <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">編輯 {holding.symbol}</h3><button onClick={onDelete} className="text-red-500 p-2 bg-red-50 rounded-lg"><Trash2 size={18} /></button></div> <div className="space-y-4"> <div><label className={styles.label}>數量</label><input type="number" className={styles.input} value={qty} onChange={e => setQty(e.target.value)} /></div> <div><label className={styles.label}>平均成本</label><input type="number" className={styles.input} value={cost} onChange={e => setCost(e.target.value)} /></div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>更新</button></div> </div> </div></div>)
 }
 
+export const EditAssetPriceModal = ({ holding, userId, onClose, onEditInfo, onSell }: any) => {
+    const [manualPrice, setManualPrice] = useState(holding.manualPrice ? String(holding.manualPrice) : '');
+    const handleSave = async () => {
+        const price = manualPrice ? parseFloat(manualPrice) : null;
+        // If price is valid number, update manualPrice. If empty, remove the field (or set null)
+        const payload: any = { manualPrice: price };
+        if (price === null || isNaN(price)) {
+            // To remove a field in Firestore, typically use FieldValue.delete(), but updateDoc with null works for "unsetting" in our logic if we check null
+            // Or explicitly delete the field. For simplicity, we set to null and App.tsx checks `manualPrice ?? currentPrice`
+            payload.manualPrice = null; 
+        }
+        await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), payload);
+        onClose();
+    };
+
+    return (
+        <div className={styles.overlay}>
+            <div className={styles.content}>
+                <div className="flex justify-between items-center mb-4">
+                    <div>
+                        <h3 className="font-bold text-xl">{holding.symbol}</h3>
+                        <div className="text-xs text-slate-400">現價: {holding.currentPrice} {holding.currency} {holding.manualPrice ? '(手動)' : '(自動)'}</div>
+                    </div>
+                    <button onClick={onClose}><X size={20} /></button>
+                </div>
+                
+                <div className="space-y-6">
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                        <label className={styles.label}>手動報價設定</label>
+                        <div className="text-xs text-slate-400 mb-2">若 API 價格不準確，可在此手動輸入。清空則恢復自動更新。</div>
+                        <div className="flex gap-2">
+                            <input 
+                                type="number" 
+                                placeholder="輸入自訂價格" 
+                                className={styles.input} 
+                                value={manualPrice} 
+                                onChange={e => setManualPrice(e.target.value)} 
+                            />
+                            <button onClick={handleSave} className="bg-indigo-600 text-white px-4 rounded-xl font-bold text-sm">儲存</button>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => { onClose(); onEditInfo(); }} className="py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm flex flex-col items-center justify-center gap-1">
+                            <Edit size={18} /> 修改成本/數量
+                        </button>
+                        <button onClick={() => { onClose(); onSell(); }} className="py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm flex flex-col items-center justify-center gap-1">
+                            <DollarSign size={18} /> 賣出資產
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export const AddDividendModal = ({ userId, groupId, platforms, holdings, people, onClose }: any) => {
+    const [platformId, setPlatformId] = useState(platforms[0]?.id || '');
+    const [assetSymbol, setAssetSymbol] = useState('');
+    const [amount, setAmount] = useState('');
+    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [addTransaction, setAddTransaction] = useState(false);
+
+    const platform = platforms.find((p:any) => p.id === platformId);
+    const platformHoldings = holdings.filter((h:any) => h.platformId === platformId);
+
+    const handleSave = async () => {
+        if(!platformId || !amount) return;
+        const val = parseFloat(amount);
+        
+        // 1. Add to Platform Balance
+        const platformRef = doc(db, getCollectionPath(userId, null, 'platforms'), platformId);
+        await updateDoc(platformRef, { balance: (platform.balance || 0) + val });
+
+        // 2. Optional: Add Ledger Transaction
+        if(addTransaction) {
+            const payerId = people.find((p: any) => p.isMe || p.uid === userId)?.id || people[0]?.id;
+            const transData = {
+                totalAmount: val, // Ledger is usually base currency, but here we assume user enters TWD equivalent or we might need conversion? 
+                // For simplicity in MVP, assume user enters amount in Ledger's currency (TWD typically) OR we denote currency.
+                // Ledger is base currency (TWD). Platform might be USD.
+                // Ideally we should ask "Amount in Platform Currency" then convert for Ledger.
+                // Let's assume Amount is in Platform Currency, and we check if we need to convert for Ledger?
+                // To keep it simple: Just log it. User can edit later.
+                description: `股利收入 (${assetSymbol || 'General'})`,
+                category: '投資收益',
+                type: 'income',
+                date: Timestamp.fromDate(new Date(date)),
+                currency: platform?.currency || 'USD', // Keep platform currency for reference
+                payers: { [payerId]: val },
+                splitDetails: { [payerId]: val }
+            };
+            await addDoc(collection(db, getCollectionPath(userId, groupId, 'transactions')), transData);
+        }
+        onClose();
+    };
+
+    return (
+        <div className={styles.overlay}>
+            <div className={styles.content}>
+                <h3 className="font-bold text-xl mb-4">領取股利 / 配息</h3>
+                <div className="space-y-4">
+                    <div>
+                        <label className={styles.label}>入帳平台</label>
+                        <select className={styles.input} value={platformId} onChange={e => setPlatformId(e.target.value)}>
+                            {platforms.map((p:any) => <option key={p.id} value={p.id}>{p.name} ({p.currency})</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className={styles.label}>標的 (可選)</label>
+                        <select className={styles.input} value={assetSymbol} onChange={e => setAssetSymbol(e.target.value)}>
+                            <option value="">-- 選擇資產 --</option>
+                            {platformHoldings.map((h:any) => <option key={h.id} value={h.symbol}>{h.symbol}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className={styles.label}>金額 ({platform?.currency})</label>
+                        <input type="number" className={styles.input} value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+                    </div>
+                    <div>
+                        <label className={styles.label}>入帳日期</label>
+                        <input type="date" className={styles.input} value={date} onChange={e => setDate(e.target.value)} />
+                    </div>
+                    
+                    <div className="flex items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100">
+                        <input type="checkbox" id="addTrans" checked={addTransaction} onChange={e => setAddTransaction(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500" />
+                        <label htmlFor="addTrans" className="text-sm font-bold text-indigo-700 cursor-pointer select-none">同步新增至記帳 (收入)</label>
+                    </div>
+
+                    <div className="flex gap-3 pt-2">
+                        <button onClick={onClose} className={styles.btnSecondary}>取消</button>
+                        <button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認領取</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export const SellAssetModal = ({ holding, onClose, onConfirm }: any) => {
     const [price, setPrice] = useState(holding.currentPrice.toString()); const [qty, setQty] = useState(holding.quantity.toString());
     return (<div className={styles.overlay}><div className={styles.content}> <h3 className="font-bold text-xl mb-4">賣出 {holding.symbol}</h3> <div className="space-y-4"> <div><label className={styles.label}>賣出價格</label><input type="number" className={styles.input} value={price} onChange={e => setPrice(e.target.value)} /></div> <div><label className={styles.label}>賣出數量 (持有: {holding.quantity})</label><input type="number" className={styles.input} value={qty} onChange={e => setQty(e.target.value)} /></div> <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={() => onConfirm(parseFloat(price) || 0, parseFloat(qty) || 0)} className={`${styles.btnPrimary} flex-1`}>確認賣出</button></div> </div> </div></div>)
@@ -735,6 +874,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
             const json = JSON.parse(res.replace(/```json/g, '').replace(/```/g, ''));
 
             const items = Array.isArray(json) ? json : [json];
+            const now = new Date();
             const processed = items.map((it: any) => {
                 // Ensure amount is number
                 it.amount = parseFloat(it.amount) || 0;
@@ -742,11 +882,18 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                 if (!it.date) it.date = new Date().toISOString().split('T')[0];
 
                 const isDup = checkDuplicate(it);
+                
+                // Anomaly Detection
+                const isFuture = new Date(it.date) > now;
+                const isLarge = it.amount > 100000;
+                const isAnomaly = isFuture || isLarge;
+
                 return {
                     ...it,
                     id: Math.random().toString(36).substr(2, 9),
-                    selected: !isDup,
-                    isDuplicate: isDup
+                    selected: !isDup && !isAnomaly, // Deselect anomalies by default
+                    isDuplicate: isDup,
+                    isAnomaly: isAnomaly
                 };
             });
             setParsedItems(processed);
@@ -910,7 +1057,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                         </div>
                         <div className="max-h-[50vh] overflow-y-auto space-y-2">
                             {parsedItems.map((item, idx) => (
-                                <div key={item.id} className={`flex items-center gap-3 p-3 rounded-xl border ${item.isDuplicate ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+                                <div key={item.id} className={`flex items-center gap-3 p-3 rounded-xl border ${item.isDuplicate ? 'bg-amber-50 border-amber-200' : item.isAnomaly ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
                                     <button onClick={() => { const newItems = [...parsedItems]; newItems[idx].selected = !newItems[idx].selected; setParsedItems(newItems); }}>
                                         {item.selected ? <CheckSquare className="text-indigo-600" /> : <Square className="text-slate-300" />}
                                     </button>
@@ -918,7 +1065,8 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                                         <div className="flex justify-between">
                                             <input value={item.description} onChange={e => { const n = [...parsedItems]; n[idx].description = e.target.value; setParsedItems(n) }} className="font-bold text-slate-800 text-sm bg-transparent border-b border-transparent focus:border-indigo-300 outline-none w-full" />
                                             <div className="flex items-center gap-1 text-slate-500">
-                                                {item.isDuplicate && <AlertTriangle size={14} className="text-amber-500" />}
+                                                {item.isDuplicate && <span title="重複資料" className="cursor-help"><AlertTriangle size={14} className="text-amber-500" /></span>}
+                                                {item.isAnomaly && <span title="數值異常 (大額或未來日期)" className="cursor-help"><AlertCircle size={14} className="text-red-500" /></span>}
                                                 <input type="number" value={item.amount} onChange={e => { const n = [...parsedItems]; n[idx].amount = parseFloat(e.target.value); setParsedItems(n) }} className="font-bold text-indigo-600 text-right w-20 bg-transparent border-b border-transparent focus:border-indigo-300 outline-none" />
                                             </div>
                                         </div>
