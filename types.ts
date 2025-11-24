@@ -11,6 +11,16 @@ export interface AssetHolding {
   type: 'stock' | 'crypto';
 }
 
+export interface InvestmentLot {
+  id: string;
+  date: any; // Timestamp
+  quantity: number; // Original quantity purchased
+  remainingQuantity: number; // Quantity currently held
+  costPerShare: number;
+  currency: string;
+  note?: string;
+}
+
 export interface Platform {
   id: string;
   name: string;
