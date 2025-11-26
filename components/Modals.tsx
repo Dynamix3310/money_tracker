@@ -129,6 +129,7 @@ export const AddRecurringModal = ({ userId, groupId, people, categories, onClose
     )
 }
 
+// --- Settings ---
 export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, currentGroupId, groups, user, categories, onAddCategory, onDeleteCategory, onGroupJoin, onGroupCreate, onGroupSwitch }: any) => {
     const [activeTab, setActiveTab] = useState('ledger');
     const [newCat, setNewCat] = useState('');
@@ -307,7 +308,33 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     const finalAmt = convertedAmount;
     const payerSum = payerMode === 'single' ? finalAmt : Object.values(multiPayers).reduce((acc: number, val: any) => acc + (parseFloat(val as string) || 0), 0);
     const splitSum = splitMode === 'equal' ? finalAmt : Object.values(customSplits).reduce((acc: number, val: any) => acc + (parseFloat(val as string) || 0), 0);
-    const fillRemainder = (id: string, currentMap: Record<string, string>, setMap: Function) => { if (finalAmt <= 0) return; const otherSum = Object.entries(currentMap).filter(([k, v]) => k !== id).reduce((acc: number, [k, v]) => acc + (parseFloat(v as string) || 0), 0); const remainder = Math.max(0, finalAmt - otherSum); setMap({ ...currentMap, [id]: Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(1) }); };
+    const fillRemainder = (id: string, currentMap: Record<string, string>, setMap: Function) => { if (finalAmt <= 0) return; const otherSum = Object.entries(currentMap).filter(([k, v]) => k !== id).reduce((acc: number, [k, v]) => acc + (parseFloat(v as string) || 0), 0); const remainder = Math.max(0, finalAmt - otherSum); setMap({ ...currentMap, [id]: Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(2) }); };
+    
+    // Auto-balance for 2 people
+    const handlePayerChange = (id: string, val: string) => {
+        const newMap = { ...multiPayers, [id]: val };
+        if (people.length === 2 && finalAmt > 0) {
+            const other = people.find((p: any) => p.id !== id);
+            if (other) {
+                const remainder = Math.max(0, finalAmt - (parseFloat(val) || 0));
+                newMap[other.id] = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(2);
+            }
+        }
+        setMultiPayers(newMap);
+    };
+
+    const handleSplitChange = (id: string, val: string) => {
+        const newMap = { ...customSplits, [id]: val };
+        if (people.length === 2 && finalAmt > 0) {
+            const other = people.find((p: any) => p.id !== id);
+            if (other) {
+                const remainder = Math.max(0, finalAmt - (parseFloat(val) || 0));
+                newMap[other.id] = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(2);
+            }
+        }
+        setCustomSplits(newMap);
+    };
+
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; setLoadingAI(true); const reader = new FileReader(); reader.onloadend = async () => { try { const prompt = `Analyze receipt. Extract totalAmount, currency, date, description, category. Return JSON.`; const resultText = await callGemini(prompt, reader.result as string); const json = JSON.parse(resultText.replace(/```json/g, '').replace(/```/g, '')); if (json.totalAmount) setAmount(json.totalAmount); if (json.currency) setCurrency(json.currency); if (json.description) setDescription(json.description); if (json.category) setCategory(json.category); if (json.date) setDate(json.date); } catch (err) { alert("AI Error"); } finally { setLoadingAI(false); } }; reader.readAsDataURL(file); };
     const handleSave = async () => { if (!amount || !description) return; if (type === 'expense' && (Math.abs(payerSum - finalAmt) > 1 || Math.abs(splitSum - finalAmt) > 1)) { alert('金額不符'); return; } let payers: any = {}; if (payerMode === 'single') payers[mainPayerId] = finalAmt; else Object.entries(multiPayers).forEach(([pid, val]) => { if (parseFloat(val as string) > 0) payers[pid] = parseFloat(val as string); }); let splits: any = {}; if (splitMode === 'equal') { const splitAmt = finalAmt / (people.length || 1); people.forEach((p: any) => splits[p.id] = splitAmt); } else Object.entries(customSplits).forEach(([pid, val]) => { if (parseFloat(val as string) > 0) splits[pid] = parseFloat(val as string); }); const data = { totalAmount: finalAmt, description, category, type, payers, splitDetails: splits, date: Timestamp.fromDate(new Date(date)), currency: 'TWD', sourceAmount: parseFloat(amount), sourceCurrency: currency, exchangeRate: currency === 'TWD' ? 1 : (finalAmt / parseFloat(amount)) }; const col = collection(db, getCollectionPath(userId, groupId, 'transactions')); if (editData) await updateDoc(doc(col, editData.id), data); else await addDoc(col, data); if (isRecurring && !editData) { const nm = new Date(date); nm.setMonth(nm.getMonth() + 1); await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), { name: description, amount: finalAmt, type, category, payerId: mainPayerId, payers, splitDetails: splits, frequency: 'monthly', active: true, nextDate: Timestamp.fromDate(nm) }); } onClose(); };
 
@@ -317,8 +344,8 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
             <div className="space-y-4">
                 <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={() => setType('expense')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'expense' ? 'bg-white shadow text-red-500' : 'text-slate-400'}`}>支出</button><button onClick={() => setType('income')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'income' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>收入</button></div>
                 <div><label className={styles.label}>金額</label><div className="flex gap-2 items-center"><select className="bg-slate-100 rounded-lg p-2 text-sm font-bold outline-none" value={currency} onChange={e => setCurrency(e.target.value)}><option value="TWD">TWD</option><option value="USD">USD</option><option value="JPY">JPY</option></select><input type="number" className="text-3xl font-bold w-full text-right border-b pb-2 outline-none bg-transparent" value={amount} onChange={e => setAmount(e.target.value)} /></div>{currency !== 'TWD' && amount && <div className="text-right text-xs text-slate-400 mt-1 font-bold">≈ NT$ {Math.round(convertedAmount).toLocaleString()}</div>}</div>
-                {type === 'expense' && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>付款人</label>{people.length > 1 && (<div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setPayerMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'single' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>單人</button><button onClick={() => setPayerMode('multi')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'multi' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>多人</button></div>)}</div>{payerMode === 'single' ? (<select className={styles.input} value={mainPayerId} onChange={e => setMainPayerId(e.target.value)}>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={multiPayers[p.id] || ''} onChange={e => setMultiPayers({ ...multiPayers, [p.id]: e.target.value })} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, multiPayers, setMultiPayers)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>)}
-                {type === 'expense' && people.length > 1 && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>分帳</label><div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setSplitMode('equal')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'equal' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>平分</button><button onClick={() => setSplitMode('custom')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'custom' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>自訂</button></div></div>{splitMode === 'equal' ? (<div className="text-center text-xs text-slate-500 py-2">每人約 <span className="font-bold text-indigo-600">${(finalAmt / people.length).toFixed(1)}</span></div>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={customSplits[p.id] || ''} onChange={e => setCustomSplits({ ...customSplits, [p.id]: e.target.value })} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, customSplits, setCustomSplits)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>)}
+                {type === 'expense' && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>付款人</label>{people.length > 1 && (<div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setPayerMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'single' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>單人</button><button onClick={() => setPayerMode('multi')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'multi' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>多人</button></div>)}</div>{payerMode === 'single' ? (<select className={styles.input} value={mainPayerId} onChange={e => setMainPayerId(e.target.value)}>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={multiPayers[p.id] || ''} onChange={e => handlePayerChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, multiPayers, setMultiPayers)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>)}
+                {type === 'expense' && people.length > 1 && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>分帳</label><div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setSplitMode('equal')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'equal' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>平分</button><button onClick={() => setSplitMode('custom')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'custom' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>自訂</button></div></div>{splitMode === 'equal' ? (<div className="text-center text-xs text-slate-500 py-2">每人約 <span className="font-bold text-indigo-600">${(finalAmt / people.length).toFixed(1)}</span></div>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={customSplits[p.id] || ''} onChange={e => handleSplitChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, customSplits, setCustomSplits)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>)}
                 <div><label className={styles.label}>說明</label><input className={styles.input} value={description} onChange={e => setDescription(e.target.value)} /></div>
                 <div className="grid grid-cols-2 gap-3"><div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e => setDate(e.target.value)} /></div><div><label className={styles.label}>分類</label><select className={styles.input} value={category} onChange={e => setCategory(e.target.value)}>{currentCats.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div></div>
                 {!editData && (<div className="flex items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100"><input type="checkbox" id="recurring" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded" /><label htmlFor="recurring" className="text-sm font-bold text-indigo-700 flex items-center gap-2"><Repeat size={16} /> 固定收支</label></div>)}
@@ -696,13 +723,23 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
     const [holdingId, setHoldingId] = useState(holdings[0]?.id || '');
     const [amount, setAmount] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [frequency, setFrequency] = useState<'once' | '1' | '3' | '6' | '12'>('once');
     const [type, setType] = useState<'cash'|'drip'>('cash');
+    const [addTransaction, setAddTransaction] = useState(true);
+
     const holding = holdings.find((h:any) => h.id === holdingId);
     const platform = platforms.find((p:any) => p.id === holding?.platformId);
+    const currentPrice = holding ? (holding.manualPrice || holding.currentPrice) : 0;
+    
+    // Calculation for preview
+    const heldShares = holding ? Math.floor(holding.quantity) : 0;
+    const dps = parseFloat(amount) || 0;
+    const totalDividend = type === 'drip' ? (heldShares * dps) : dps;
+    const dripShares = (type === 'drip' && totalDividend && currentPrice > 0) ? totalDividend / currentPrice : 0;
 
     const handleSave = async () => {
         if(!holding || !amount) return;
-        const val = parseFloat(amount);
+        const val = parseFloat(amount); // This is Total Amount for Cash, or DPS for DRIP
         const batch = writeBatch(db);
         const dateTs = Timestamp.fromDate(new Date(date));
         
@@ -712,62 +749,108 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
         const payerId = !peopleSnap.empty ? peopleSnap.docs[0].id : people[0].id;
 
         if (type === 'drip') {
-            // DRIP: Calculate shares, Add Lot, Update Holding
-            // 'val' here is Total Dividend Amount (Cash Value)
-            const price = holding.manualPrice || holding.currentPrice;
-            const newShares = val / price;
-            
-            // 1. Create Lot
-            const lotRef = doc(collection(db, getCollectionPath(userId, null, 'holdings'), holding.id, 'lots'));
-            batch.set(lotRef, {
-                date: dateTs,
-                quantity: newShares,
-                remainingQuantity: newShares,
-                costPerShare: price,
-                currency: holding.currency,
-                note: 'DRIP'
-            });
+            // DRIP LOGIC
+            if (frequency === 'once') {
+                // Immediate Execution
+                if (!currentPrice || currentPrice <= 0) { alert('無法取得股價'); return; }
+                
+                // 1. Create Lot
+                const lotRef = doc(collection(db, getCollectionPath(userId, null, 'holdings'), holding.id, 'lots'));
+                batch.set(lotRef, {
+                    date: dateTs,
+                    quantity: dripShares,
+                    remainingQuantity: dripShares,
+                    costPerShare: currentPrice,
+                    currency: holding.currency,
+                    note: 'DRIP'
+                });
 
-            // 2. Update Holding
-            const newTotalQty = holding.quantity + newShares;
-            const newAvgCost = ((holding.quantity * holding.avgCost) + val) / newTotalQty;
-            batch.update(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), {
-                quantity: newTotalQty,
-                avgCost: newAvgCost
-            });
+                // 2. Update Holding
+                const newTotalQty = holding.quantity + dripShares;
+                const newAvgCost = ((holding.quantity * holding.avgCost) + totalDividend) / newTotalQty;
+                batch.update(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), {
+                    quantity: newTotalQty,
+                    avgCost: newAvgCost
+                });
 
-            // 3. Transaction
-            const transRef = doc(collection(db, getCollectionPath(userId, groupId, 'transactions')));
-            batch.set(transRef, {
-                date: dateTs,
-                description: `股息再投入: ${holding.symbol} (${fmt(newShares, 4)}股)`,
-                category: '投資收益',
-                type: 'income',
-                totalAmount: val,
-                currency: holding.currency,
-                payers: {[payerId]: val},
-                splitDetails: {[payerId]: val},
-                note: 'DRIP'
-            });
+                // 3. Transaction
+                if (addTransaction) {
+                    const transRef = doc(collection(db, getCollectionPath(userId, groupId, 'transactions')));
+                    batch.set(transRef, {
+                        date: dateTs,
+                        description: `股息再投入: ${holding.symbol} (${fmt(dripShares, 4)}股)`,
+                        category: '投資收益',
+                        type: 'income',
+                        totalAmount: totalDividend,
+                        currency: holding.currency,
+                        payers: {[payerId]: totalDividend},
+                        splitDetails: {[payerId]: totalDividend},
+                        note: `DPS: ${val}`
+                    });
+                }
+            } else {
+                // Recurring Rule for DRIP
+                const interval = parseInt(frequency);
+                const nextDate = new Date(date);
+                const ruleData = {
+                    name: `DRIP: ${holding.symbol}`,
+                    amount: val, // DPS
+                    type: 'income',
+                    category: '投資收益',
+                    payerId: payerId,
+                    frequency: 'custom',
+                    intervalMonths: interval,
+                    isDRIP: true,
+                    linkedHoldingId: holding.id,
+                    active: true,
+                    nextDate: Timestamp.fromDate(nextDate),
+                    payers: { [payerId]: val },
+                    splitDetails: { [payerId]: val }
+                };
+                await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), ruleData);
+            }
 
         } else {
-            // Cash: Add to Platform, Add Transaction
-            if (platform) {
-                batch.update(doc(db, getCollectionPath(userId, null, 'platforms'), platform.id), {
-                    balance: increment(val)
-                });
+            // CASH LOGIC
+            if (frequency === 'once') {
+                if (platform) {
+                    batch.update(doc(db, getCollectionPath(userId, null, 'platforms'), platform.id), {
+                        balance: increment(val)
+                    });
+                }
+                if (addTransaction) {
+                    const transRef = doc(collection(db, getCollectionPath(userId, groupId, 'transactions')));
+                    batch.set(transRef, {
+                        date: dateTs,
+                        description: `現金股利: ${holding.symbol}`,
+                        category: '投資收益',
+                        type: 'income',
+                        totalAmount: val,
+                        currency: holding.currency,
+                        payers: {[payerId]: val},
+                        splitDetails: {[payerId]: val}
+                    });
+                }
+            } else {
+                // Recurring Rule for Cash
+                const interval = parseInt(frequency);
+                const nextDate = new Date(date); 
+                const ruleData = {
+                    name: `股利: ${holding.symbol}`,
+                    amount: val, // Total Amount
+                    type: 'income',
+                    category: '投資收益',
+                    payerId: payerId,
+                    frequency: 'custom',
+                    intervalMonths: interval,
+                    linkedPlatformId: platform.id,
+                    active: true,
+                    nextDate: Timestamp.fromDate(nextDate),
+                    payers: { [payerId]: val },
+                    splitDetails: { [payerId]: val }
+                };
+                await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), ruleData);
             }
-            const transRef = doc(collection(db, getCollectionPath(userId, groupId, 'transactions')));
-            batch.set(transRef, {
-                date: dateTs,
-                description: `現金股利: ${holding.symbol}`,
-                category: '投資收益',
-                type: 'income',
-                totalAmount: val,
-                currency: holding.currency,
-                payers: {[payerId]: val},
-                splitDetails: {[payerId]: val}
-            });
         }
         
         await batch.commit();
@@ -783,8 +866,40 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
             </div>
             <div className="space-y-4">
                 <div><label className={styles.label}>標的</label><select className={styles.input} value={holdingId} onChange={e=>setHoldingId(e.target.value)}>{holdings.map((h:any)=><option key={h.id} value={h.id}>{h.symbol}</option>)}</select></div>
-                <div><label className={styles.label}>股息總金額</label><input type="number" className={styles.input} value={amount} onChange={e=>setAmount(e.target.value)} /></div>
+                <div>
+                    <label className={styles.label}>
+                        {type === 'drip' ? `每股股息 (DPS)` : `股息總金額`} ({platform?.currency})
+                    </label>
+                    <input type="number" className={styles.input} value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0.00" />
+                    {type === 'drip' && holding && amount && (
+                        <div className="text-xs bg-slate-50 p-2 rounded mt-1 text-slate-600 space-y-1">
+                            <div>持有股數 (整數): {heldShares}</div>
+                            <div>預估總額: {fmt(totalDividend)}</div>
+                            <div className="font-bold text-indigo-600">預估買入: {fmt(dripShares, 4)} 股 (@ {currentPrice})</div>
+                        </div>
+                    )}
+                </div>
+                
                 <div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e=>setDate(e.target.value)} /></div>
+                
+                <div>
+                    <label className={styles.label}>頻率</label>
+                    <div className="grid grid-cols-3 gap-2">
+                        <button onClick={() => setFrequency('once')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === 'once' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>單次</button>
+                        <button onClick={() => setFrequency('1')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '1' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每月</button>
+                        <button onClick={() => setFrequency('3')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '3' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每季</button>
+                        <button onClick={() => setFrequency('6')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '6' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每半年</button>
+                        <button onClick={() => setFrequency('12')} className={`py-2 px-1 text-xs rounded-lg border ${frequency === '12' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>每年</button>
+                    </div>
+                </div>
+
+                {frequency === 'once' && (
+                    <div className="flex items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100">
+                        <input type="checkbox" id="addTrans" checked={addTransaction} onChange={e => setAddTransaction(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500" />
+                        <label htmlFor="addTrans" className="text-sm font-bold text-indigo-700 cursor-pointer select-none">同步新增至記帳紀錄</label>
+                    </div>
+                )}
+
                 <button onClick={handleSave} className={styles.btnPrimary}>確認</button>
             </div>
         </div></div>
@@ -962,11 +1077,301 @@ export const AIAssistantModal = ({ onClose, contextData }: any) => {
     );
 };
 
-export const AIBatchImportModal = ({ onClose }: any) => {
+export const AIBatchImportModal = ({ userId, groupId, categories, existingTransactions, accounts, creditCards, existingBankLogs, existingCardLogs, people, onClose, initialConfig }: any) => {
+    const [mode, setMode] = useState<'text' | 'image' | 'file'>('text');
+    const [target, setTarget] = useState<'ledger' | 'bank' | 'card'>('ledger');
+    const [targetId, setTargetId] = useState('');
+
+    const [textInput, setTextInput] = useState('');
+    const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+    const [parsedItems, setParsedItems] = useState<any[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        if (initialConfig) {
+            setTarget(initialConfig.target);
+            if (initialConfig.targetId) setTargetId(initialConfig.targetId);
+        } else {
+            if (target === 'bank' && accounts.length > 0) setTargetId(accounts[0].id);
+            if (target === 'card' && creditCards.length > 0) setTargetId(creditCards[0].id);
+        }
+    }, [target, accounts, creditCards, initialConfig]);
+
+    const checkDuplicate = (item: any) => {
+        const itemDateStr = item.date;
+        const isSameDate = (ts: any, dateStr: string) => {
+            if (!ts) return false;
+            const d = new Date(ts.seconds * 1000).toISOString().split('T')[0];
+            return d === dateStr;
+        };
+
+        if (target === 'ledger') {
+            return existingTransactions.some((t: any) => isSameDate(t.date, itemDateStr) && Math.abs(t.totalAmount - item.amount) < 1);
+        } else if (target === 'bank') {
+            return existingBankLogs.some((l: any) => {
+                if (l.accountId !== targetId) return false;
+                return isSameDate(l.date, itemDateStr) && Math.abs(l.amount - item.amount) < 1;
+            });
+        } else if (target === 'card') {
+            return existingCardLogs.some((l: any) => {
+                if (l.cardId !== targetId) return false;
+                return isSameDate(l.date, itemDateStr) && Math.abs(l.amount - item.amount) < 1;
+            });
+        }
+        return false;
+    };
+
+    const handleAnalyze = async () => {
+        if ((mode === 'text' && !textInput) || (mode === 'image' && !imagePreview) || (mode === 'file' && !textInput)) return;
+        setLoading(true);
+        try {
+            let prompt = "";
+            
+            let contentToAnalyze = mode === 'image' ? imagePreview! : textInput;
+            
+            if (mode !== 'image') {
+                contentToAnalyze = contentToAnalyze.replace(/(\d{3})[\/\-](\d{1,2})[\/\-](\d{1,2})/g, (match, y, m, d) => {
+                    const year = parseInt(y);
+                    if (year < 1911) {
+                        return `${year + 1911}-${m}-${d}`;
+                    }
+                    return match;
+                });
+            }
+
+            if (target === 'ledger') {
+                prompt = `Analyze the following data. It is likely accounting records or invoices.
+                   Ignore header rows.
+                   Extract and Map to JSON array:
+                   - description: Seller Name or Item Name
+                   - amount: Number (remove currency symbols, handle commas)
+                   - date: YYYY-MM-DD (If missing year, use current year ${new Date().getFullYear()})
+                   - type: 'expense' (default) or 'income' (if strictly implies income)
+                   - category: Choose closest match from [${categories.map((c: any) => c.name).join(', ')}] based on seller/item.
+                   `;
+            } else if (target === 'bank') {
+                prompt = `Parse the input into a JSON array of bank logs. Fields: date (YYYY-MM-DD), description, amount (number), type (in/out). Note: 'in' is deposit/income, 'out' is withdrawal/expense. Infer type from context if possible.`;
+            } else if (target === 'card') {
+                prompt = `Parse the input into a JSON array of credit card logs. Fields: date (YYYY-MM-DD), description, amount (number). Note: Amount should be positive number.`;
+            }
+
+            const res = await callGemini(prompt, contentToAnalyze);
+            const json = JSON.parse(res.replace(/```json/g, '').replace(/```/g, ''));
+
+            const items = Array.isArray(json) ? json : [json];
+            const now = new Date();
+            const processed = items.map((it: any) => {
+                let amt = it.amount;
+                if (typeof amt === 'string') {
+                    amt = parseFloat(amt.replace(/,/g, ''));
+                }
+                it.amount = amt || 0;
+                
+                if (!it.date) it.date = new Date().toISOString().split('T')[0];
+
+                const isDup = checkDuplicate(it);
+                
+                const isFuture = new Date(it.date) > now;
+                const isLarge = it.amount > 100000;
+                const isAnomaly = isFuture || isLarge;
+
+                return {
+                    ...it,
+                    id: Math.random().toString(36).substr(2, 9),
+                    selected: !isDup && !isAnomaly, 
+                    isDuplicate: isDup,
+                    isAnomaly: isAnomaly
+                };
+            });
+            setParsedItems(processed);
+        } catch (e) {
+            console.error(e);
+            alert('解析失敗，請重試');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSave = async () => {
+        const selected = parsedItems.filter(i => i.selected);
+        if (selected.length === 0) return;
+        setLoading(true);
+        try {
+            const batch = [];
+            if (target === 'ledger') {
+                const col = collection(db, getCollectionPath(userId, groupId, 'transactions'));
+                const payerId = people.find((p: any) => p.isMe || p.uid === userId)?.id || people[0]?.id;
+                for (const item of selected) {
+                    batch.push(addDoc(col, {
+                        totalAmount: item.amount,
+                        description: item.description,
+                        category: item.category || '未分類',
+                        type: item.type || 'expense',
+                        date: Timestamp.fromDate(new Date(item.date)),
+                        currency: 'TWD',
+                        payers: { [payerId]: item.amount },
+                        splitDetails: { [payerId]: item.amount }
+                    }));
+                }
+            } else if (target === 'bank') {
+                const col = collection(db, getCollectionPath(userId, null, 'bankLogs'));
+                for (const item of selected) {
+                    batch.push(addDoc(col, {
+                        accountId: targetId,
+                        type: item.type || 'out',
+                        amount: item.amount,
+                        description: item.description,
+                        date: Timestamp.fromDate(new Date(item.date))
+                    }));
+                }
+            } else if (target === 'card') {
+                const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));
+                for (const item of selected) {
+                    batch.push(addDoc(col, {
+                        cardId: targetId,
+                        amount: item.amount,
+                        description: item.description,
+                        date: Timestamp.fromDate(new Date(item.date)),
+                        isReconciled: false
+                    }));
+                }
+            }
+            await Promise.all(batch);
+            onClose();
+        } catch (e) {
+            console.error(e);
+            alert('儲存失敗');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleImageChange = (e: any) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => setImagePreview(reader.result as string);
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleFileChange = (e: any) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                if (event.target?.result) {
+                    setTextInput(event.target.result as string);
+                }
+            };
+            reader.readAsText(file);
+        }
+    };
+
     return (
-        <div className={styles.overlay}><div className={styles.content}>
-            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">智能匯入</h3><button onClick={onClose}><X size={20}/></button></div>
-            <div className="text-center py-8 text-slate-500">功能開發中 (Mock)</div>
-        </div></div>
-    );
-};
+        <div className={styles.overlay}>
+            <div className={`${styles.content} max-w-2xl`}>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-xl flex items-center gap-2"><Sparkles className="text-indigo-500" /> AI 批次匯入</h3>
+                    <button onClick={onClose}><X size={20} /></button>
+                </div>
+                {parsedItems.length === 0 ? (
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className={styles.label}>匯入目標</label>
+                                <select className={styles.input} value={target} onChange={e => setTarget(e.target.value as any)}>
+                                    <option value="ledger">記帳 (Ledger)</option>
+                                    <option value="bank">銀行 (Bank)</option>
+                                    <option value="card">信用卡 (Card)</option>
+                                </select>
+                            </div>
+                            <div>
+                                {target === 'bank' && (
+                                    <>
+                                        <label className={styles.label}>選擇帳戶</label>
+                                        <select className={styles.input} value={targetId} onChange={e => setTargetId(e.target.value)}>{accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+                                    </>
+                                )}
+                                {target === 'card' && (
+                                    <>
+                                        <label className={styles.label}>選擇卡片</label>
+                                        <select className={styles.input} value={targetId} onChange={e => setTargetId(e.target.value)}>{creditCards.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex bg-slate-100 p-1 rounded-xl">
+                            <button onClick={() => setMode('text')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode === 'text' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}><FileText size={16} /> 文字貼上</button>
+                            <button onClick={() => setMode('file')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode === 'file' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}><FileSpreadsheet size={16} /> CSV/檔案</button>
+                            <button onClick={() => setMode('image')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode === 'image' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}><ImageIcon size={16} /> 圖片掃描</button>
+                        </div>
+
+                        {mode === 'text' && (
+                            <textarea className="w-full h-40 p-3 border rounded-xl text-sm" placeholder={`貼上文字內容...\n例如: 1/15 午餐 120\n1/15 計程車 250`} value={textInput} onChange={e => setTextInput(e.target.value)}></textarea>
+                        )}
+
+                        {mode === 'file' && (
+                            <div className="border-2 border-dashed border-indigo-200 rounded-xl p-8 flex flex-col items-center justify-center bg-indigo-50/50 relative hover:bg-indigo-50 transition-colors">
+                                <FileSpreadsheet size={48} className="text-indigo-400 mb-3" />
+                                <div className="text-sm font-bold text-indigo-600 mb-1">上傳 CSV 或純文字檔</div>
+                                <div className="text-xs text-slate-400 mb-4">支援台灣雲端發票匯出格式</div>
+                                {textInput ? (
+                                    <div className="w-full bg-white p-3 rounded border text-xs text-slate-600 max-h-32 overflow-hidden relative">
+                                        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-white/90"></div>
+                                        {textInput.slice(0, 200)}...
+                                    </div>
+                                ) : (
+                                    <span className="text-xs bg-white px-3 py-1 rounded-full border shadow-sm text-slate-500">選擇檔案...</span>
+                                )}
+                                <input type="file" accept=".csv,.txt" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileChange} />
+                            </div>
+                        )}
+
+                        {mode === 'image' && (
+                            <div className="border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center bg-slate-50 relative">
+                                {imagePreview ? <img src={imagePreview} className="max-h-40 rounded object-contain" /> : <div className="text-slate-400 text-center"><Camera size={32} className="mx-auto mb-2" /><span className="text-xs">點擊上傳照片</span></div>}
+                                <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleImageChange} />
+                            </div>
+                        )}
+                        <button onClick={handleAnalyze} disabled={loading} className={styles.btnPrimary}>{loading ? <Loader2 className="animate-spin" /> : 'AI 智慧分析'}</button>
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                            <div className="text-sm text-slate-500">解析結果 ({parsedItems.length} 筆)</div>
+                            <button onClick={() => setParsedItems([])} className="text-sm text-indigo-600 font-bold">重新上傳</button>
+                        </div>
+                        <div className="max-h-[50vh] overflow-y-auto space-y-2">
+                            {parsedItems.map((item, idx) => (
+                                <div key={item.id} className={`flex items-center gap-3 p-3 rounded-xl border ${item.isDuplicate ? 'bg-amber-50 border-amber-200' : item.isAnomaly ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
+                                    <button onClick={() => { const newItems = [...parsedItems]; newItems[idx].selected = !newItems[idx].selected; setParsedItems(newItems); }}>
+                                        {item.selected ? <CheckSquare className="text-indigo-600" /> : <Square className="text-slate-300" />}
+                                    </button>
+                                    <div className="flex-1">
+                                        <div className="flex justify-between">
+                                            <input value={item.description} onChange={e => { const n = [...parsedItems]; n[idx].description = e.target.value; setParsedItems(n) }} className="font-bold text-slate-800 text-sm bg-transparent border-b border-transparent focus:border-indigo-300 outline-none w-full" />
+                                            <div className="flex items-center gap-1 text-slate-500">
+                                                {item.isDuplicate && <span title="重複資料" className="cursor-help"><AlertTriangle size={14} className="text-amber-500" /></span>}
+                                                {item.isAnomaly && <span title="數值異常 (大額或未來日期)" className="cursor-help"><AlertCircle size={14} className="text-red-500" /></span>}
+                                                <input type="number" value={item.amount} onChange={e => { const n = [...parsedItems]; n[idx].amount = parseFloat(e.target.value); setParsedItems(n) }} className="font-bold text-indigo-600 text-right w-20 bg-transparent border-b border-transparent focus:border-indigo-300 outline-none" />
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2 mt-1">
+                                            <input type="date" value={item.date} onChange={e => { const n = [...parsedItems]; n[idx].date = e.target.value; setParsedItems(n) }} className="text-xs text-slate-400 bg-transparent" />
+                                            {target === 'ledger' && (<select value={item.category} onChange={e => { const n = [...parsedItems]; n[idx].category = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{categories.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select>)}
+                                            {(target === 'bank' || target === 'ledger') && (<select value={item.type} onChange={e => { const n = [...parsedItems]; n[idx].type = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{target === 'ledger' ? <><option value="expense">支出</option><option value="income">收入</option></> : <><option value="out">支出</option><option value="in">收入</option></>}</select>)}
+                                        </div>
+                                    </div>
+                                    <button onClick={() => { setParsedItems(parsedItems.filter((_, i) => i !== idx)) }} className="text-slate-300 hover:text-red-500"><Trash2 size={16} /></button>
+                                </div>
+                            ))}
+                        </div>
+                        <button onClick={handleSave} disabled={loading} className={styles.btnPrimary}>{loading ? <Loader2 className="animate-spin" /> : `確認匯入 (${parsedItems.filter(i => i.selected).length} 筆)`}</button>
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}
