@@ -283,7 +283,7 @@ export const PortfolioRebalanceModal = ({ holdings, platforms, rates, baseCurren
     );
 };
 
-// --- AddTransactionModal ---
+// --- AddTransactionModal (With Auto-Balancing) ---
 export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData, rates, convert }: any) => {
     const [type, setType] = useState<'expense' | 'income'>(editData?.type || 'expense');
     const [amount, setAmount] = useState(editData?.sourceAmount?.toString() || editData?.totalAmount?.toString() || '');
@@ -316,7 +316,8 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
         if (people.length === 2 && finalAmt > 0) {
             const other = people.find((p: any) => p.id !== id);
             if (other) {
-                const remainder = Math.max(0, finalAmt - (parseFloat(val) || 0));
+                const valNum = parseFloat(val) || 0;
+                const remainder = Math.max(0, finalAmt - valNum);
                 newMap[other.id] = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(2);
             }
         }
@@ -328,7 +329,8 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
         if (people.length === 2 && finalAmt > 0) {
             const other = people.find((p: any) => p.id !== id);
             if (other) {
-                const remainder = Math.max(0, finalAmt - (parseFloat(val) || 0));
+                const valNum = parseFloat(val) || 0;
+                const remainder = Math.max(0, finalAmt - valNum);
                 newMap[other.id] = Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(2);
             }
         }
@@ -1010,42 +1012,127 @@ export const TransferModal = ({ userId, accounts, onClose }: any) => {
 };
 
 export const BankDetailModal = ({ userId, account, logs, onClose, onImport }: any) => {
+    const [amount, setAmount] = useState('');
+    const [type, setType] = useState<'in' | 'out'>('out');
+    const [desc, setDesc] = useState('');
+    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+    const handleSave = async () => {
+        if (!amount) return;
+        await addDoc(collection(db, getCollectionPath(userId, null, 'bankLogs')), {
+            accountId: account.id,
+            type,
+            amount: parseFloat(amount),
+            date: Timestamp.fromDate(new Date(date)),
+            description: desc || (type === 'in' ? '存款' : '提款')
+        });
+        setAmount(''); setDesc('');
+    };
+    const handleDelete = async (id: string) => { if (confirm('確定刪除此紀錄?')) await deleteDoc(doc(db, getCollectionPath(userId, null, 'bankLogs'), id)); };
+    const handleExport = () => {
+        if (logs.length === 0) { alert('無資料可匯出'); return; }
+        const headers = ['Date', 'Type', 'Amount', 'Description', 'Account'];
+        const rows = logs.map((l: any) => {
+            const d = l.date?.seconds ? new Date(l.date.seconds * 1000).toISOString().split('T')[0] : '';
+            return [d, l.type, l.amount, l.description, account.name];
+        });
+        const csvContent = [headers.join(','), ...rows.map((r: any) => r.join(','))].join('\n');
+        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = `${account.name}_logs.csv`; a.click();
+    };
+
+    const groupedLogs = logs.sort((a: any, b: any) => (Number(b.date?.seconds) || 0) - (Number(a.date?.seconds) || 0)).reduce((acc: any, log: any) => {
+        const d = log.date?.seconds ? new Date(Number(log.date.seconds) * 1000) : new Date();
+        const key = `${d.getFullYear()}年${d.getMonth() + 1}月`;
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(log);
+        return acc;
+    }, {});
+    const sortedMonths = Object.keys(groupedLogs).sort((a, b) => b.localeCompare(a, 'zh-TW', { numeric: true }));
+
     return (
-        <div className={styles.overlay}><div className={styles.content}>
-            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">{account.name} 明細</h3><button onClick={onClose}><X size={20}/></button></div>
-            <div className="mb-4 flex justify-between items-center">
-                <div className="text-2xl font-bold font-mono">${account.currentBalance?.toLocaleString()}</div>
-                <button onClick={onImport} className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><Upload size={14}/> 匯入 CSV</button>
-            </div>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-                {logs.sort((a:any,b:any)=>b.date.seconds-a.date.seconds).map((l:any)=>(
-                    <div key={l.id} className="flex justify-between items-center p-2 border-b">
-                        <div><div className="font-bold text-sm">{l.description}</div><div className="text-xs text-slate-400">{new Date(l.date.seconds*1000).toLocaleDateString()}</div></div>
-                        <div className={`font-bold font-mono ${l.type==='in'?'text-emerald-600':'text-slate-700'}`}>{l.type==='in'?'+':'-'}{l.amount.toLocaleString()}</div>
+        <div className={styles.overlay}>
+            <div className={styles.content}>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-xl">{account.name}</h3>
+                    <div className="flex gap-2">
+                        <button onClick={handleExport} className="p-2 text-slate-400 hover:text-indigo-600 bg-slate-50 rounded-full" title="匯出"><Download size={18} /></button>
+                        <button onClick={onImport} className="p-2 text-slate-400 hover:text-indigo-600 bg-slate-50 rounded-full" title="匯入"><Upload size={18} /></button>
+                        <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 rounded-full"><X size={20} /></button>
                     </div>
-                ))}
-                {logs.length===0 && <div className="text-center text-slate-400 text-xs py-4">無交易紀錄</div>}
+                </div>
+                <div className="bg-slate-50 p-4 rounded-xl mb-4 text-center"> <div className="text-xs text-slate-400">目前餘額</div> <div className="text-3xl font-bold text-slate-800">${account.currentBalance?.toLocaleString()}</div> </div>
+                <div className="flex flex-col gap-2 mb-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                    <div className="text-xs font-bold text-indigo-600 mb-1">新增流水帳</div>
+                    <div className="flex gap-2">
+                        <select className="w-24 rounded-lg border px-2 bg-slate-50 text-sm h-9" value={type} onChange={(e: any) => setType(e.target.value)}><option value="out">支出</option><option value="in">收入</option></select>
+                        <input type="date" className="flex-1 rounded-lg border px-3 text-sm h-9" value={date} onChange={e => setDate(e.target.value)} />
+                    </div>
+                    <div className="flex gap-2">
+                        <input placeholder="金額" type="number" className="w-24 rounded-lg border px-3 text-sm h-9" value={amount} onChange={e => setAmount(e.target.value)} />
+                        <input placeholder="備註" className="flex-1 rounded-lg border px-3 text-sm h-9" value={desc} onChange={e => setDesc(e.target.value)} />
+                        <button onClick={handleSave} className="bg-indigo-600 text-white px-4 rounded-lg font-bold text-sm h-9">存</button>
+                    </div>
+                </div>
+                <div className="space-y-0 max-h-[40vh] overflow-y-auto border rounded-xl border-slate-100">
+                    {logs.length === 0 && <div className="text-center text-slate-300 py-8">無紀錄</div>}
+                    {sortedMonths.map((month: any) => (
+                        <div key={month}>
+                            <div className="sticky top-0 bg-slate-50 py-1.5 px-3 border-b border-slate-100 text-xs font-bold text-slate-500 z-10 flex justify-between items-center">
+                                <span>{month}</span>
+                            </div>
+                            <div className="bg-white">
+                                {groupedLogs[month].map((l: any) => (
+                                    <div key={l.id} className="flex justify-between items-center p-3 border-b last:border-0 border-slate-50 hover:bg-slate-50 transition-colors">
+                                        <div> <div className="font-bold text-sm text-slate-700">{l.description}</div> <div className="text-xs text-slate-400">{l.date?.seconds ? new Date(Number(l.date.seconds) * 1000).toLocaleDateString() : ''}</div> </div>
+                                        <div className="flex items-center gap-3"> <div className={`font-bold ${l.type === 'in' ? 'text-emerald-600' : 'text-slate-800'}`}>{l.type === 'in' ? '+' : ''}{l.amount.toLocaleString()}</div> <button onClick={() => handleDelete(l.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14} /></button> </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
-        </div></div>
-    );
-};
+        </div>
+    )
+}
 
 export const CardDetailModal = ({ userId, card, cardLogs, allCardLogs, transactions, onClose, groups, currentGroupId }: any) => {
-    return (
-        <div className={styles.overlay}><div className={styles.content}>
-             <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">{card.name} 帳單</h3><button onClick={onClose}><X size={20}/></button></div>
-             <div className="space-y-2 max-h-60 overflow-y-auto">
-                {cardLogs.sort((a:any,b:any)=>b.date.seconds-a.date.seconds).map((l:any)=>(
-                    <div key={l.id} className="flex justify-between items-center p-2 border-b">
-                        <div><div className="font-bold text-sm">{l.description}</div><div className="text-xs text-slate-400">{new Date(l.date.seconds*1000).toLocaleDateString()}</div></div>
-                        <div className="font-bold font-mono text-slate-700">-{l.amount.toLocaleString()}</div>
-                    </div>
-                ))}
-                {cardLogs.length===0 && <div className="text-center text-slate-400 text-xs py-4">無刷卡紀錄</div>}
-             </div>
-        </div></div>
-    );
-};
+    const [showAddLog, setShowAddLog] = useState(false);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [amt, setAmt] = useState('');
+    const [desc, setDesc] = useState('');
+    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [linkLog, setLinkLog] = useState<CreditCardLog | null>(null);
+    const today = new Date();
+    const billingDay = card.billingDay;
+    let cycleStart = new Date(today.getFullYear(), today.getMonth(), billingDay);
+    if (today.getDate() < billingDay) cycleStart.setMonth(cycleStart.getMonth() - 1);
+    const [viewStart, setViewStart] = useState(cycleStart.toISOString().split('T')[0]);
+    const currentCycleStart = new Date(viewStart);
+    const currentCycleEnd = new Date(currentCycleStart); currentCycleEnd.setMonth(currentCycleEnd.getMonth() + 1); currentCycleEnd.setDate(currentCycleEnd.getDate() - 1);
+    const prevCycle = () => { const d = new Date(viewStart); d.setMonth(d.getMonth() - 1); setViewStart(d.toISOString().split('T')[0]); };
+    const nextCycle = () => { const d = new Date(viewStart); d.setMonth(d.getMonth() + 1); setViewStart(d.toISOString().split('T')[0]); };
+    const globalUsedIds = allCardLogs.filter((cl: any) => cl.id !== linkLog?.id && cl.linkedTransactionId).map((cl: any) => cl.linkedTransactionId);
+    const availableTrans = transactions.filter((t: any) => !globalUsedIds.includes(t.id)).slice(0, 30);
+    const viewLogs = cardLogs.filter((l: any) => {
+        if (!l.date?.seconds) return false;
+        const d = new Date(Number(l.date.seconds) * 1000);
+        return d.getTime() >= currentCycleStart.getTime() && d.getTime() <= currentCycleEnd.getTime();
+    }).sort((a: any, b: any) => (Number(b.date?.seconds) || 0) - (Number(a.date?.seconds) || 0));
+    const handleSaveLog = async () => {
+        if (!amt || !desc) return;
+        const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));
+        const payload = { cardId: card.id, amount: parseFloat(amt), description: desc, date: Timestamp.fromDate(new Date(date)) };
+        if (editingId) { await updateDoc(doc(col, editingId), payload); setEditingId(null); } else { await addDoc(col, { ...payload, isReconciled: false }); }
+        setAmt(''); setDesc(''); setShowAddLog(false);
+    };
+    const handleEditClick = (log: any) => { setEditingId(log.id); setAmt(log.amount.toString()); setDesc(log.description); setDate(new Date((log.date.seconds as number) * 1000).toISOString().split('T')[0]); setShowAddLog(true); };
+    const handleDeleteClick = async (id: string) => { if (window.confirm('確定要刪除此筆刷卡紀錄嗎？(需二次確認)')) { await deleteDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), id)); if (editingId === id) { setShowAddLog(false); setEditingId(null); } } };
+    const linkTrans = async (transId: string) => { if (!linkLog) return; await updateDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), linkLog.id), { isReconciled: true, linkedTransactionId: transId }); setLinkLog(null); }
+    return (<div className={styles.overlay}> {linkLog ? (<div className={styles.content}> <div className="flex justify-between items-center mb-4"><h3 className="font-bold">連結記帳資料</h3><button onClick={() => setLinkLog(null)}><X /></button></div> <div className="space-y-2 max-h-80 overflow-y-auto"> {availableTrans.map((t: any) => (<div key={t.id} onClick={() => linkTrans(t.id)} className="bg-white p-3 border rounded-xl hover:border-indigo-500 cursor-pointer flex justify-between"> <div> <div className="font-bold text-sm">{t.description}</div> <div className="text-xs text-slate-400 font-bold text-indigo-500">{t.date?.seconds ? new Date(t.date.seconds * 1000).toLocaleDateString() : ''}</div> </div> <div className="font-bold">${t.totalAmount}</div> </div>))} </div> </div>) : (<div className={`${styles.content} h-[85vh]`}> <div className="flex justify-between items-center mb-4"> <div><h3 className="font-bold text-xl">{card.name}</h3><div className="text-xs text-slate-500">結帳日: 每月 {card.billingDay} 號</div></div> <button onClick={onClose}><X /></button> </div> <div className="flex items-center justify-between bg-slate-100 p-2 rounded-xl mb-4"> <button onClick={prevCycle} className="p-1 hover:bg-white rounded">◀</button> <div className="text-xs font-bold text-slate-600">{currentCycleStart.toLocaleDateString()} ~ {currentCycleEnd.toLocaleDateString()}</div> <button onClick={nextCycle} className="p-1 hover:bg-white rounded">▶</button> </div> <button onClick={() => { setShowAddLog(!showAddLog); setEditingId(null); setAmt(''); setDesc(''); }} className="w-full py-2 mb-4 border-2 border-dashed border-indigo-200 text-indigo-600 rounded-xl font-bold text-sm">{showAddLog && !editingId ? '隱藏新增' : '+ 新增刷卡紀錄'}</button> {showAddLog && (<div className="bg-slate-50 p-4 rounded-xl border mb-4 space-y-2 animate-in slide-in-from-bottom-4"> <div className="text-xs font-bold text-indigo-500 mb-1">{editingId ? '編輯紀錄' : '新增紀錄'}</div> <div className="flex gap-2"> <div className="flex-1"><label className={styles.label}>日期</label><input type="date" className="w-full p-2 rounded border text-sm" value={date} onChange={e => setDate(e.target.value)} /></div> <div className="flex-1"><label className={styles.label}>金額</label><input type="number" className="w-full p-2 rounded border text-sm" value={amt} onChange={e => setAmt(e.target.value)} /></div> </div> <div><label className={styles.label}>說明</label><div className="flex gap-2"><input className="flex-1 p-2 rounded border text-sm" value={desc} onChange={e => setDesc(e.target.value)} /><button onClick={handleSaveLog} className="bg-indigo-600 text-white px-4 rounded text-xs font-bold">{editingId ? '更新' : '存'}</button></div></div> </div>)} <div className="space-y-2 max-h-[50vh] overflow-y-auto"> {viewLogs.length === 0 && <div className="text-center text-slate-400 py-4">此週期無紀錄</div>} {viewLogs.map((log: any) => { const linkedT = transactions.find((t: any) => t.id === log.linkedTransactionId); return (<div key={log.id} className={`p-3 rounded-xl border ${log.isReconciled ? 'bg-emerald-50/50 border-emerald-100' : 'bg-white border-slate-200'}`}> <div className="flex justify-between items-center mb-1"> <div className="flex items-center gap-2"> <button onClick={async () => { await updateDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), log.id), { isReconciled: !log.isReconciled }) }}>{log.isReconciled ? <CheckCircle size={18} className="text-emerald-500" /> : <Circle size={18} className="text-slate-300" />}</button> <span className={`text-sm font-bold ${log.isReconciled ? 'text-slate-400 line-through' : ''}`}>{log.description}</span> </div> <div className="font-bold font-mono">${log.amount}</div> </div> <div className="flex justify-between items-center pl-7"> <div className="text-[10px] text-slate-400">{new Date((log.date.seconds as number) * 1000).toLocaleDateString()}</div> <div className="flex items-center gap-2"> {!log.isReconciled && <button onClick={() => setLinkLog(log)} className="text-[10px] flex gap-1 bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold"><LinkIcon size={10} /> 連結</button>} {log.isReconciled && linkedT && <span className="text-[10px] text-emerald-600 flex gap-1 bg-emerald-50 px-2 py-1 rounded"><Link2 size={10} /> {linkedT.description}</span>} <button onClick={() => handleEditClick(log)} className="text-slate-400 hover:text-indigo-600"><Edit size={12} /></button> <button onClick={() => handleDeleteClick(log.id)} className="text-slate-400 hover:text-red-600"><Trash2 size={12} /></button> </div> </div> </div>) })} </div> </div>)} </div>)
+}
 
 export const AIAssistantModal = ({ onClose, contextData }: any) => {
     const [messages, setMessages] = useState<ChatMessage[]>([{role:'model', text:'你好！我是您的財務助理。有關您的資產或記帳問題都可以問我。'}]);
