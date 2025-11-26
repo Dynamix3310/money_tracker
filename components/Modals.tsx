@@ -1238,9 +1238,9 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                    - category: Choose closest match from [${categories.map((c: any) => c.name).join(', ')}] based on seller/item.
                    `;
             } else if (target === 'bank') {
-                prompt = `Parse the input into a JSON array of bank logs. Fields: date (YYYY-MM-DD), description, amount (number), type (in/out). Note: 'in' is deposit/income, 'out' is withdrawal/expense. Infer type from context if possible.`;
+                prompt = `Parse the input into a JSON array of bank logs. Fields: date (YYYY-MM-DD), description, amount (number), type (in/out). Note: 'in' is deposit/income, 'out' is withdrawal/expense. Infer type from context if possible. (If missing year, use current year ${new Date().getFullYear()})`;
             } else if (target === 'card') {
-                prompt = `Parse the input into a JSON array of credit card logs. Fields: date (YYYY-MM-DD), description, amount (number). Note: Amount should be positive number.`;
+                prompt = `Parse the input into a JSON array of credit card logs. Fields: date (YYYY-MM-DD), description, amount (number). Note: Amount should be positive number. (If missing year, use current year ${new Date().getFullYear()})`;
             }
 
             const res = await callGemini(prompt, contentToAnalyze);
