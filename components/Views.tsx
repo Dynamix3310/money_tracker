@@ -56,6 +56,7 @@ export const LedgerView = ({ transactions, categories, people, onAdd, onBatchAdd
    const [timeRange, setTimeRange] = useState<'week' | 'month' | 'lastMonth' | 'year' | 'custom'>('month');
    const [customStart, setCustomStart] = useState(new Date().toISOString().split('T')[0]);
    const [customEnd, setCustomEnd] = useState(new Date().toISOString().split('T')[0]);
+   const [statsFilter, setStatsFilter] = useState<string>('all'); // 'all' or personId
    
    const linkedIds = useMemo(() => new Set(cardLogs.filter((c:any) => c.isReconciled && c.linkedTransactionId).map((c:any) => c.linkedTransactionId)), [cardLogs]);
 
@@ -108,10 +109,6 @@ export const LedgerView = ({ transactions, categories, people, onAdd, onBatchAdd
    const filtered = transactions.filter((t: any) => {
        const matchSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase()) || t.category.includes(searchTerm);
        
-       // Apply date filter in stats mode only? No, apply to list too if we want consistency, 
-       // but usually list view implies "all history" with search. 
-       // Let's apply date filter when in STATS mode specifically as requested by prompt.
-       
        if (viewMode === 'stats') {
            if(!t.date?.seconds) return false;
            const d = new Date(t.date.seconds * 1000);
@@ -162,21 +159,36 @@ export const LedgerView = ({ transactions, categories, people, onAdd, onBatchAdd
    const statsData = useMemo(() => {
        const catMap: any = {}, memberMap: any = {};
        let totalExp = 0, totalInc = 0;
+       
        filtered.forEach((t: any) => { 
-          if(t.type==='expense') { 
-             catMap[t.category]=(catMap[t.category]||0)+t.totalAmount; 
-             totalExp += t.totalAmount;
-             Object.entries(t.payers).forEach(([pid, amt]:any)=>memberMap[pid]=(memberMap[pid]||0)+amt); 
+          if (statsFilter === 'all') {
+              if(t.type==='expense') { 
+                 catMap[t.category]=(catMap[t.category]||0)+t.totalAmount; 
+                 totalExp += t.totalAmount;
+                 Object.entries(t.payers).forEach(([pid, amt]:any)=>memberMap[pid]=(memberMap[pid]||0)+amt); 
+              } else {
+                 totalInc += t.totalAmount;
+              }
           } else {
-             totalInc += t.totalAmount;
+              // Individual stats based on split share
+              const myShare = t.splitDetails?.[statsFilter] || 0;
+              if (myShare > 0) {
+                  if (t.type === 'expense') {
+                      catMap[t.category] = (catMap[t.category] || 0) + myShare;
+                      totalExp += myShare;
+                  } else {
+                      totalInc += myShare;
+                  }
+              }
           }
        });
+       
        return { 
           catChart: Object.entries(catMap).map(([name,value]:any)=>({name,value})).sort((a:any,b:any)=>b.value-a.value), 
           memChart: Object.entries(memberMap).map(([pid,value]:any)=>({name:people.find((p:any)=>p.id===pid)?.name||'Unknown',value})).sort((a:any,b:any)=>b.value-a.value),
           totalExp, totalInc
        };
-   }, [filtered, people]);
+   }, [filtered, people, statsFilter]);
 
    return (
       <div className="space-y-4 animate-in slide-in-from-bottom-4 pb-20">
@@ -261,24 +273,32 @@ export const LedgerView = ({ transactions, categories, people, onAdd, onBatchAdd
 
          {viewMode === 'stats' && (
              <div className="space-y-6">
+                 <div className="flex gap-2 mb-2 overflow-x-auto pb-2 scrollbar-hide">
+                    <button onClick={()=>setStatsFilter('all')} className={`px-3 py-1 rounded-full text-xs font-bold border whitespace-nowrap ${statsFilter==='all'?'bg-indigo-600 text-white border-indigo-600':'bg-white text-slate-500 border-slate-200'}`}>全體</button>
+                    {people.map((p: any) => (
+                        <button key={p.id} onClick={()=>setStatsFilter(p.id)} className={`px-3 py-1 rounded-full text-xs font-bold border whitespace-nowrap ${statsFilter===p.id?'bg-indigo-600 text-white border-indigo-600':'bg-white text-slate-500 border-slate-200'}`}>{p.name}</button>
+                    ))}
+                 </div>
                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64">
-                     <h3 className="font-bold text-slate-700 text-sm mb-2">收支比例</h3>
+                     <h3 className="font-bold text-slate-700 text-sm mb-2">{statsFilter==='all'?'全體':'個人'}收支比例</h3>
                      <ExpensePieChart data={statsData.catChart}/>
                  </div>
                  <div className="flex gap-3">
                      <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-100">
-                         <div className="text-xs text-slate-400">總支出</div>
+                         <div className="text-xs text-slate-400">{statsFilter==='all'?'總支出':'個人負擔'}</div>
                          <div className="text-xl font-bold text-red-500">${statsData.totalExp.toLocaleString()}</div>
                      </div>
                      <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-100">
-                         <div className="text-xs text-slate-400">總收入</div>
+                         <div className="text-xs text-slate-400">{statsFilter==='all'?'總收入':'個人收入'}</div>
                          <div className="text-xl font-bold text-emerald-600">${statsData.totalInc.toLocaleString()}</div>
                      </div>
                  </div>
-                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64">
-                     <h3 className="font-bold text-slate-700 text-sm mb-2">成員付款統計</h3>
-                     <ExpensePieChart data={statsData.memChart}/>
-                 </div>
+                 {statsFilter === 'all' && (
+                     <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64">
+                         <h3 className="font-bold text-slate-700 text-sm mb-2">成員付款統計</h3>
+                         <ExpensePieChart data={statsData.memChart}/>
+                     </div>
+                 )}
              </div>
          )}
 
