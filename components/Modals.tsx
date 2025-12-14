@@ -130,7 +130,7 @@ export const AddRecurringModal = ({ userId, groupId, people, categories, onClose
 }
 
 // --- Settings ---
-export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, currentGroupId, groups, user, categories, onAddCategory, onDeleteCategory, onGroupJoin, onGroupCreate, onGroupSwitch }: any) => {
+export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, currentGroupId, groups, user, categories: rawCategories, onAddCategory, onDeleteCategory, onUpdateCategory, onGroupJoin, onGroupCreate, onGroupSwitch }: any) => {
     const [activeTab, setActiveTab] = useState('ledger');
     const [newCat, setNewCat] = useState('');
     const [catType, setCatType] = useState<'expense' | 'income'>('expense');
@@ -139,6 +139,29 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
     const [geminiKey, setGeminiKey] = useState(localStorage.getItem('user_gemini_key') || '');
     const [joinId, setJoinId] = useState('');
     const [newGroupName, setNewGroupName] = useState('');
+    const [editingCatId, setEditingCatId] = useState<string | null>(null);
+    const [editingBudget, setEditingBudget] = useState('');
+
+    const categories = useMemo(() => [...rawCategories].sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [rawCategories]);
+
+    const handleMove = (index: number, direction: 'up' | 'down') => {
+        const newCats = [...categories];
+        const targetIndex = direction === 'up' ? index - 1 : index + 1;
+        if (targetIndex < 0 || targetIndex >= newCats.length) return;
+
+        // Swap
+        const temp = newCats[index];
+        newCats[index] = newCats[targetIndex];
+        newCats[targetIndex] = temp;
+
+        // Update both orders
+        // Use index as order
+        onUpdateCategory(newCats[index].id, { order: index });
+        onUpdateCategory(newCats[targetIndex].id, { order: targetIndex });
+
+        // Optimize: Update all to ensure consistency if needed, but swapping two should be enough if list is contiguous
+        // To be safe, let's just update the two swapped items with their new array indices
+    };
 
     const handleSaveKeys = () => {
         localStorage.setItem('finnhub_key', finnhubKey);
@@ -170,7 +193,7 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
                                             <div className={`font-bold text-sm ${g.id === currentGroupId ? 'text-indigo-700' : 'text-slate-700'}`}>{g.name}</div>
                                             <div className="text-[10px] text-slate-400">{g.id === user.uid ? '個人預設' : '群組帳本'}</div>
                                         </div>
-                                        {g.id === currentGroupId && <CheckCircle size={16} className="text-indigo-600"/>}
+                                        {g.id === currentGroupId && <CheckCircle size={16} className="text-indigo-600" />}
                                     </div>
                                 ))}
                             </div>
@@ -218,7 +241,34 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
                             <div className="flex gap-2 items-center"><div className="flex-1"><label className={styles.label}>分類名稱</label><input placeholder="例如: 娛樂" className={`${styles.input} py-2 text-sm`} value={newCat} onChange={e => setNewCat(e.target.value)} /></div><div className="w-24"><label className={styles.label}>類型</label><select className="border rounded-lg px-2 py-2 text-sm h-[38px] w-full bg-white" value={catType} onChange={(e: any) => setCatType(e.target.value)}><option value="expense">支出</option><option value="income">收入</option></select></div></div>
                             <div className="flex gap-2 items-end"><div className="flex-1"><label className={styles.label}>每月預算 (可選)</label><input type="number" placeholder="0 = 無限制" className={`${styles.input} py-2 text-sm`} value={newCatBudget} onChange={e => setNewCatBudget(e.target.value)} /></div><button onClick={() => { onAddCategory(newCat, catType, parseFloat(newCatBudget)); setNewCat(''); setNewCatBudget(''); }} className="bg-indigo-600 text-white px-4 py-2 h-[38px] rounded-lg font-bold text-sm mb-[1px] flex items-center gap-1"><PlusIcon size={14} /> 新增</button></div>
                         </div>
-                        <div className="max-h-60 overflow-y-auto space-y-2">{categories.map((c: Category) => (<div key={c.id} className="flex justify-between items-center p-2 bg-slate-50 rounded border border-slate-100"><div><span className="text-sm font-bold flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${c.type === 'expense' ? 'bg-red-400' : 'bg-emerald-400'}`}></div>{c.name}</span>{c.budgetLimit && c.budgetLimit > 0 && <div className="text-xs text-slate-400 pl-4">預算: ${c.budgetLimit.toLocaleString()}</div>}</div><button onClick={() => onDeleteCategory(c.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14} /></button></div>))}</div>
+                        <div className="max-h-60 overflow-y-auto space-y-2">
+                            {categories.map((c: Category, idx: number) => (
+                                <div key={c.id} className="flex justify-between items-center p-2 bg-slate-50 rounded border border-slate-100">
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2">
+                                            <div className="flex flex-col">
+                                                <button onClick={() => handleMove(idx, 'up')} disabled={idx === 0} className="text-slate-300 hover:text-indigo-600 disabled:opacity-0"><ArrowUpRight size={10} className="-rotate-45" /></button>
+                                                <button onClick={() => handleMove(idx, 'down')} disabled={idx === categories.length - 1} className="text-slate-300 hover:text-indigo-600 disabled:opacity-0"><ArrowDownRight size={10} className="-rotate-45" /></button>
+                                            </div>
+                                            <span className="text-sm font-bold flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${c.type === 'expense' ? 'bg-red-400' : 'bg-emerald-400'}`}></div>{c.name}</span>
+                                        </div>
+                                        <div className="pl-6 mt-1">
+                                            {editingCatId === c.id ? (
+                                                <div className="flex gap-2 items-center">
+                                                    <input type="number" className="border rounded px-2 py-1 text-xs w-24" value={editingBudget} onChange={e => setEditingBudget(e.target.value)} placeholder="預算" />
+                                                    <button onClick={() => { onUpdateCategory(c.id, { budgetLimit: parseFloat(editingBudget) || 0 }); setEditingCatId(null); }} className="bg-indigo-600 text-white px-2 py-1 rounded text-xs">OK</button>
+                                                </div>
+                                            ) : (
+                                                <div className="text-xs text-slate-400 flex items-center gap-2" onClick={() => { setEditingCatId(c.id); setEditingBudget(c.budgetLimit?.toString() || ''); }}>
+                                                    預算: ${c.budgetLimit?.toLocaleString() || 0} <Edit size={10} className="text-slate-300 hover:text-indigo-600 cursor-pointer" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <button onClick={() => onDeleteCategory(c.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14} /></button>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 )}
             </div>
@@ -255,7 +305,7 @@ export const PortfolioRebalanceModal = ({ holdings, platforms, rates, baseCurren
     const handleAIAnalysis = async () => {
         setLoadingAi(true);
         try {
-            const prompt = `As a financial advisor, analyze this portfolio rebalancing need. Currency: ${baseCurrency}. Total Value: ${Math.round(calcData.total)}. Stock: ${calcData.stock.pct.toFixed(1)}% (Target ${targets.stock}%), Crypto: ${calcData.crypto.pct.toFixed(1)}% (Target ${targets.crypto}%), Cash: ${calcData.cash.pct.toFixed(1)}% (Target ${targets.cash}%). Holdings: ${holdings.map((h:any) => `${h.symbol} (${h.type})`).join(', ')}. Provide a concise trade plan in Traditional Chinese.`;
+            const prompt = `As a financial advisor, analyze this portfolio rebalancing need. Currency: ${baseCurrency}. Total Value: ${Math.round(calcData.total)}. Stock: ${calcData.stock.pct.toFixed(1)}% (Target ${targets.stock}%), Crypto: ${calcData.crypto.pct.toFixed(1)}% (Target ${targets.crypto}%), Cash: ${calcData.cash.pct.toFixed(1)}% (Target ${targets.cash}%). Holdings: ${holdings.map((h: any) => `${h.symbol} (${h.type})`).join(', ')}. Provide a concise trade plan in Traditional Chinese.`;
             const result = await callGemini(prompt);
             setAiAdvice(result);
         } catch (e) { setAiAdvice("AI Error"); } finally { setLoadingAi(false); }
@@ -271,14 +321,14 @@ export const PortfolioRebalanceModal = ({ holdings, platforms, rates, baseCurren
 
     return (
         <div className={styles.overlay}><div className={`${styles.content} max-w-2xl`}>
-            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl flex items-center gap-2"><Scale className="text-indigo-600"/> 再平衡</h3><button onClick={onClose}><X size={20} /></button></div>
+            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl flex items-center gap-2"><Scale className="text-indigo-600" /> 再平衡</h3><button onClick={onClose}><X size={20} /></button></div>
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-6">
-                <h4 className="font-bold text-sm text-slate-500 mb-4 uppercase">配置目標 (總和: <span className={totalPercent!==100?'text-red-500':'text-emerald-600'}>{totalPercent}%</span>)</h4>
-                {renderRow('股票', calcData.stock, targets.stock, (v:number) => setTargets(p => ({...p, stock: v})))}
-                {renderRow('加密貨幣', calcData.crypto, targets.crypto, (v:number) => setTargets(p => ({...p, crypto: v})))}
-                {renderRow('現金', calcData.cash, targets.cash, (v:number) => setTargets(p => ({...p, cash: v})))}
+                <h4 className="font-bold text-sm text-slate-500 mb-4 uppercase">配置目標 (總和: <span className={totalPercent !== 100 ? 'text-red-500' : 'text-emerald-600'}>{totalPercent}%</span>)</h4>
+                {renderRow('股票', calcData.stock, targets.stock, (v: number) => setTargets(p => ({ ...p, stock: v })))}
+                {renderRow('加密貨幣', calcData.crypto, targets.crypto, (v: number) => setTargets(p => ({ ...p, crypto: v })))}
+                {renderRow('現金', calcData.cash, targets.cash, (v: number) => setTargets(p => ({ ...p, cash: v })))}
             </div>
-            {totalPercent === 100 && (<><button onClick={handleAIAnalysis} disabled={loadingAi} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold shadow-lg flex justify-center items-center gap-2 mb-4">{loadingAi ? <Loader2 className="animate-spin"/> : <Sparkles size={18}/>} AI 建議</button>{aiAdvice && <div className="bg-indigo-50 p-5 rounded-xl border border-indigo-100 text-sm text-slate-700 whitespace-pre-wrap">{aiAdvice}</div>}</>)}
+            {totalPercent === 100 && (<><button onClick={handleAIAnalysis} disabled={loadingAi} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold shadow-lg flex justify-center items-center gap-2 mb-4">{loadingAi ? <Loader2 className="animate-spin" /> : <Sparkles size={18} />} AI 建議</button>{aiAdvice && <div className="bg-indigo-50 p-5 rounded-xl border border-indigo-100 text-sm text-slate-700 whitespace-pre-wrap">{aiAdvice}</div>}</>)}
         </div></div>
     );
 };
@@ -292,9 +342,10 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     const [category, setCategory] = useState(editData?.category || '');
     const [date, setDate] = useState(editData?.date?.seconds ? new Date(editData.date.seconds * 1000).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
     const [payerMode, setPayerMode] = useState<'single' | 'multi'>('single');
-    const [splitMode, setSplitMode] = useState<'equal' | 'custom'>('equal');
+    const [splitMode, setSplitMode] = useState<'equal' | 'custom' | 'single'>('equal');
     const [isRecurring, setIsRecurring] = useState(false);
     const [mainPayerId, setMainPayerId] = useState(editData ? Object.keys(editData.payers)[0] : (people.find((p: any) => p.isMe || p.uid === auth.currentUser?.uid)?.id || people[0]?.id || ''));
+    const [singleSplitPayerId, setSingleSplitPayerId] = useState(editData ? Object.keys(editData.splitDetails).find(k => editData.splitDetails[k] > 0) || '' : ''); // Who pays 100% in single split mode
     const [multiPayers, setMultiPayers] = useState<Record<string, string>>(editData && Object.keys(editData.payers).length > 1 ? Object.fromEntries(Object.entries(editData.payers).map(([k, v]: any) => [k, v.toString()])) : {});
     const [customSplits, setCustomSplits] = useState<Record<string, string>>(editData && editData.splitDetails ? Object.fromEntries(Object.entries(editData.splitDetails).map(([k, v]: any) => [k, v.toString()])) : {});
     const [loadingAI, setLoadingAI] = useState(false);
@@ -309,7 +360,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     const payerSum = payerMode === 'single' ? finalAmt : Object.values(multiPayers).reduce((acc: number, val: any) => acc + (parseFloat(val as string) || 0), 0);
     const splitSum = splitMode === 'equal' ? finalAmt : Object.values(customSplits).reduce((acc: number, val: any) => acc + (parseFloat(val as string) || 0), 0);
     const fillRemainder = (id: string, currentMap: Record<string, string>, setMap: Function) => { if (finalAmt <= 0) return; const otherSum = Object.entries(currentMap).filter(([k, v]) => k !== id).reduce((acc: number, [k, v]) => acc + (parseFloat(v as string) || 0), 0); const remainder = Math.max(0, finalAmt - otherSum); setMap({ ...currentMap, [id]: Number.isInteger(remainder) ? remainder.toString() : remainder.toFixed(2) }); };
-    
+
     // Auto-balance for 2 people
     const handlePayerChange = (id: string, val: string) => {
         const newMap = { ...multiPayers, [id]: val };
@@ -338,16 +389,55 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     };
 
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; setLoadingAI(true); const reader = new FileReader(); reader.onloadend = async () => { try { const prompt = `Analyze receipt. Extract totalAmount, currency, date, description, category. Return JSON.`; const resultText = await callGemini(prompt, reader.result as string); const json = JSON.parse(resultText.replace(/```json/g, '').replace(/```/g, '')); if (json.totalAmount) setAmount(json.totalAmount); if (json.currency) setCurrency(json.currency); if (json.description) setDescription(json.description); if (json.category) setCategory(json.category); if (json.date) setDate(json.date); } catch (err) { alert("AI Error"); } finally { setLoadingAI(false); } }; reader.readAsDataURL(file); };
-    const handleSave = async () => { if (!amount || !description) return; if (type === 'expense' && (Math.abs(payerSum - finalAmt) > 1 || Math.abs(splitSum - finalAmt) > 1)) { alert('金額不符'); return; } let payers: any = {}; if (payerMode === 'single') payers[mainPayerId] = finalAmt; else Object.entries(multiPayers).forEach(([pid, val]) => { if (parseFloat(val as string) > 0) payers[pid] = parseFloat(val as string); }); let splits: any = {}; if (splitMode === 'equal') { const splitAmt = finalAmt / (people.length || 1); people.forEach((p: any) => splits[p.id] = splitAmt); } else Object.entries(customSplits).forEach(([pid, val]) => { if (parseFloat(val as string) > 0) splits[pid] = parseFloat(val as string); }); const data = { totalAmount: finalAmt, description, category, type, payers, splitDetails: splits, date: Timestamp.fromDate(new Date(date)), currency: 'TWD', sourceAmount: parseFloat(amount), sourceCurrency: currency, exchangeRate: currency === 'TWD' ? 1 : (finalAmt / parseFloat(amount)) }; const col = collection(db, getCollectionPath(userId, groupId, 'transactions')); if (editData) await updateDoc(doc(col, editData.id), data); else await addDoc(col, data); if (isRecurring && !editData) { const nm = new Date(date); nm.setMonth(nm.getMonth() + 1); await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), { name: description, amount: finalAmt, type, category, payerId: mainPayerId, payers, splitDetails: splits, frequency: 'monthly', active: true, nextDate: Timestamp.fromDate(nm) }); } onClose(); };
+    const handleSave = async () => {
+        if (!amount || !description) return;
+        if (type === 'expense' && (Math.abs(payerSum - finalAmt) > 1 || Math.abs(splitSum - finalAmt) > 1 && splitMode !== 'single')) { alert('金額不符'); return; }
+
+        let payers: any = {};
+        let splits: any = {};
+
+        if (type === 'income') {
+            // Income Logic: Assigned to specific person (Earner)
+            // Use mainPayerId as the "Earner"
+            payers[mainPayerId] = finalAmt;
+            splits[mainPayerId] = finalAmt; // Also assign split to them so it balances
+        } else {
+            // Expense Logic
+            if (payerMode === 'single') payers[mainPayerId] = finalAmt;
+            else Object.entries(multiPayers).forEach(([pid, val]) => { if (parseFloat(val as string) > 0) payers[pid] = parseFloat(val as string); });
+
+            if (splitMode === 'equal') {
+                const splitAmt = finalAmt / (people.length || 1);
+                people.forEach((p: any) => splits[p.id] = splitAmt);
+            } else if (splitMode === 'single') {
+                const target = singleSplitPayerId || people[0]?.id;
+                splits[target] = finalAmt;
+            } else {
+                Object.entries(customSplits).forEach(([pid, val]) => { if (parseFloat(val as string) > 0) splits[pid] = parseFloat(val as string); });
+            }
+        }
+
+        const data = { totalAmount: finalAmt, description, category, type, payers, splitDetails: splits, date: Timestamp.fromDate(new Date(date)), currency: 'TWD', sourceAmount: parseFloat(amount), sourceCurrency: currency, exchangeRate: currency === 'TWD' ? 1 : (finalAmt / parseFloat(amount)) };
+        const col = collection(db, getCollectionPath(userId, groupId, 'transactions'));
+        if (editData) await updateDoc(doc(col, editData.id), data);
+        else await addDoc(col, data);
+
+        if (isRecurring && !editData) {
+            const nm = new Date(date); nm.setMonth(nm.getMonth() + 1);
+            await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), { name: description, amount: finalAmt, type, category, payerId: mainPayerId, payers, splitDetails: splits, frequency: 'monthly', active: true, nextDate: Timestamp.fromDate(nm) });
+        }
+        onClose();
+    };
 
     return (
         <div className={styles.overlay}><div className={styles.content}>
-            <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-xl">{editData ? '編輯' : '記一筆'}</h3>{!editData && <label className="cursor-pointer bg-indigo-50 text-indigo-600 px-3 py-1 rounded text-xs font-bold flex items-center gap-1">{loadingAI ? <Loader2 size={14} className="animate-spin"/> : <Camera size={14}/>} AI <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={loadingAI}/></label>}</div>
+            <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-xl">{editData ? '編輯' : '記一筆'}</h3>{!editData && <label className="cursor-pointer bg-indigo-50 text-indigo-600 px-3 py-1 rounded text-xs font-bold flex items-center gap-1">{loadingAI ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />} AI <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={loadingAI} /></label>}</div>
             <div className="space-y-4">
                 <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={() => setType('expense')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'expense' ? 'bg-white shadow text-red-500' : 'text-slate-400'}`}>支出</button><button onClick={() => setType('income')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'income' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>收入</button></div>
                 <div><label className={styles.label}>金額</label><div className="flex gap-2 items-center"><select className="bg-slate-100 rounded-lg p-2 text-sm font-bold outline-none" value={currency} onChange={e => setCurrency(e.target.value)}><option value="TWD">TWD</option><option value="USD">USD</option><option value="JPY">JPY</option></select><input type="number" className="text-3xl font-bold w-full text-right border-b pb-2 outline-none bg-transparent" value={amount} onChange={e => setAmount(e.target.value)} /></div>{currency !== 'TWD' && amount && <div className="text-right text-xs text-slate-400 mt-1 font-bold">≈ NT$ {Math.round(convertedAmount).toLocaleString()}</div>}</div>
                 {type === 'expense' && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>付款人</label>{people.length > 1 && (<div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setPayerMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'single' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>單人</button><button onClick={() => setPayerMode('multi')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'multi' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>多人</button></div>)}</div>{payerMode === 'single' ? (<select className={styles.input} value={mainPayerId} onChange={e => setMainPayerId(e.target.value)}>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={multiPayers[p.id] || ''} onChange={e => handlePayerChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, multiPayers, setMultiPayers)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>)}
-                {type === 'expense' && people.length > 1 && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>分帳</label><div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setSplitMode('equal')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'equal' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>平分</button><button onClick={() => setSplitMode('custom')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'custom' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>自訂</button></div></div>{splitMode === 'equal' ? (<div className="text-center text-xs text-slate-500 py-2">每人約 <span className="font-bold text-indigo-600">${(finalAmt / people.length).toFixed(1)}</span></div>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={customSplits[p.id] || ''} onChange={e => handleSplitChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, customSplits, setCustomSplits)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>)}
+                {type === 'income' && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><label className={styles.label}>收入歸屬 (誰賺的?)</label><select className={styles.input} value={mainPayerId} onChange={e => setMainPayerId(e.target.value)}>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>)}
+                {type === 'expense' && people.length > 1 && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>分帳</label><div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setSplitMode('equal')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'equal' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>平分</button><button onClick={() => setSplitMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'single' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>單人</button><button onClick={() => setSplitMode('custom')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'custom' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>自訂</button></div></div>{splitMode === 'equal' ? (<div className="text-center text-xs text-slate-500 py-2">每人約 <span className="font-bold text-indigo-600">${(finalAmt / people.length).toFixed(1)}</span></div>) : splitMode === 'single' ? (<div className="flex items-center gap-2 mb-1"><span className="text-sm">由</span><select className="flex-1 bg-white border rounded px-2 py-1 text-sm outline-none" value={singleSplitPayerId} onChange={e => setSingleSplitPayerId(e.target.value)}><option value="">請選擇...</option>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><span className="text-sm">負擔全部</span></div>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={customSplits[p.id] || ''} onChange={e => handleSplitChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, customSplits, setCustomSplits)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>)}
                 <div><label className={styles.label}>說明</label><input className={styles.input} value={description} onChange={e => setDescription(e.target.value)} /></div>
                 <div className="grid grid-cols-2 gap-3"><div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e => setDate(e.target.value)} /></div><div><label className={styles.label}>分類</label><select className={styles.input} value={category} onChange={e => setCategory(e.target.value)}>{currentCats.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div></div>
                 {!editData && (<div className="flex items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100"><input type="checkbox" id="recurring" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded" /><label htmlFor="recurring" className="text-sm font-bold text-indigo-700 flex items-center gap-2"><Repeat size={16} /> 固定收支</label></div>)}
@@ -374,14 +464,14 @@ export const AddPlatformModal = ({ userId, onClose, editData }: any) => {
 
 export const ManagePlatformCashModal = ({ platform, userId, onClose }: any) => {
     const [amount, setAmount] = useState('');
-    const [type, setType] = useState<'deposit'|'withdraw'>('deposit');
+    const [type, setType] = useState<'deposit' | 'withdraw'>('deposit');
     const handleSave = async () => {
-        if(!amount) return;
+        if (!amount) return;
         const newBal = type === 'deposit' ? platform.balance + parseFloat(amount) : platform.balance - parseFloat(amount);
         await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platform.id), { balance: newBal });
         onClose();
     };
-    return (<div className={styles.overlay}><div className={styles.content}><h3 className="font-bold text-xl mb-4">{platform.name} 現金管理</h3><div className="flex bg-slate-100 p-1 rounded-xl mb-4"><button onClick={()=>setType('deposit')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='deposit'?'bg-white shadow text-emerald-600':'text-slate-400'}`}>入金</button><button onClick={()=>setType('withdraw')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='withdraw'?'bg-white shadow text-red-500':'text-slate-400'}`}>出金</button></div><div className="mb-4"><label className={styles.label}>金額</label><input type="number" className={styles.input} value={amount} onChange={e=>setAmount(e.target.value)} autoFocus/></div><div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認</button></div></div></div>);
+    return (<div className={styles.overlay}><div className={styles.content}><h3 className="font-bold text-xl mb-4">{platform.name} 現金管理</h3><div className="flex bg-slate-100 p-1 rounded-xl mb-4"><button onClick={() => setType('deposit')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'deposit' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>入金</button><button onClick={() => setType('withdraw')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'withdraw' ? 'bg-white shadow text-red-500' : 'text-slate-400'}`}>出金</button></div><div className="mb-4"><label className={styles.label}>金額</label><input type="number" className={styles.input} value={amount} onChange={e => setAmount(e.target.value)} autoFocus /></div><div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認</button></div></div></div>);
 };
 
 // --- Add Asset Modal (Enhanced with Lots) ---
@@ -390,24 +480,24 @@ export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
     const [quantity, setQuantity] = useState('');
     const [cost, setCost] = useState('');
     const [platformId, setPlatformId] = useState(platforms[0]?.id || '');
-    const [type, setType] = useState<'stock'|'crypto'>('stock');
+    const [type, setType] = useState<'stock' | 'crypto'>('stock');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [deductCash, setDeductCash] = useState(true);
 
     const handleSave = async () => {
-        if(!symbol || !quantity || !cost || !platformId) return;
+        if (!symbol || !quantity || !cost || !platformId) return;
         const qtyNum = parseFloat(quantity);
         const costNum = parseFloat(cost);
         const totalCost = qtyNum * costNum;
-        const platform = platforms.find((p:any) => p.id === platformId);
-        if(!platform) return;
+        const platform = platforms.find((p: any) => p.id === platformId);
+        if (!platform) return;
 
         const holdingsRef = collection(db, getCollectionPath(userId, null, 'holdings'));
-        
+
         // Check if holding exists
         const q = query(holdingsRef, where('symbol', '==', symbol.toUpperCase()), where('platformId', '==', platformId));
         const snap = await getDocs(q);
-        
+
         let holdingDocRef;
         let currentQty = 0;
         let currentAvgCost = 0;
@@ -447,7 +537,7 @@ export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
         // 2. Update Holding Aggregates (Weighted Average)
         const newTotalQty = currentQty + qtyNum;
         const newAvgCost = ((currentQty * currentAvgCost) + totalCost) / newTotalQty;
-        
+
         batch.update(holdingDocRef, {
             quantity: newTotalQty,
             avgCost: newAvgCost
@@ -470,7 +560,7 @@ export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
             <h3 className="font-bold text-xl mb-4">新增持倉 (買入)</h3>
             <div className="space-y-4">
                 <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={() => setType('stock')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'stock' ? 'bg-white shadow text-blue-600' : 'text-slate-400'}`}>股票</button><button onClick={() => setType('crypto')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'crypto' ? 'bg-white shadow text-orange-600' : 'text-slate-400'}`}>加密貨幣</button></div>
-                <div><label className={styles.label}>平台</label><select className={styles.input} value={platformId} onChange={e => setPlatformId(e.target.value)}>{platforms.map((p:any)=><option key={p.id} value={p.id}>{p.name} ({p.currency})</option>)}</select></div>
+                <div><label className={styles.label}>平台</label><select className={styles.input} value={platformId} onChange={e => setPlatformId(e.target.value)}>{platforms.map((p: any) => <option key={p.id} value={p.id}>{p.name} ({p.currency})</option>)}</select></div>
                 <div><label className={styles.label}>代號</label><input placeholder="e.g. AAPL, 2330.TW" className={styles.input} value={symbol} onChange={e => setSymbol(e.target.value)} /></div>
                 <div className="grid grid-cols-2 gap-3">
                     <div><label className={styles.label}>數量</label><input type="number" className={styles.input} value={quantity} onChange={e => setQuantity(e.target.value)} /></div>
@@ -487,7 +577,7 @@ export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
 // --- Sell Asset Modal (FIFO / Lots) ---
 export const SellAssetModal = ({ holding, userId, onClose }: any) => {
     const [price, setPrice] = useState(holding.manualPrice || holding.currentPrice);
-    const [mode, setMode] = useState<'fifo'|'specific'>('fifo');
+    const [mode, setMode] = useState<'fifo' | 'specific'>('fifo');
     const [sellQty, setSellQty] = useState<string>('');
     const [lots, setLots] = useState<any[]>([]);
     const [loadingLots, setLoadingLots] = useState(true);
@@ -499,9 +589,9 @@ export const SellAssetModal = ({ holding, userId, onClose }: any) => {
             const q = query(collection(db, getCollectionPath(userId, null, 'holdings'), holding.id, 'lots'), orderBy('date', 'asc'));
             const snap = await getDocs(q);
             const fetchedLots = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            
+
             // Check if sum of lots matches holding qty
-            const sumLots = fetchedLots.reduce((acc, l:any) => acc + l.remainingQuantity, 0);
+            const sumLots = fetchedLots.reduce((acc, l: any) => acc + l.remainingQuantity, 0);
             if (holding.quantity - sumLots > 0.0001) {
                 // Create a virtual legacy lot for the difference
                 fetchedLots.unshift({
@@ -559,7 +649,7 @@ export const SellAssetModal = ({ holding, userId, onClose }: any) => {
         try {
             const batch = writeBatch(db);
             const holdingRef = doc(db, getCollectionPath(userId, null, 'holdings'), holding.id);
-            
+
             // 1. Update Lots
             for (const [lotId, qty] of Object.entries(lotSelection)) {
                 if ((qty as number) <= 0) continue;
@@ -592,7 +682,7 @@ export const SellAssetModal = ({ holding, userId, onClose }: any) => {
                 const oldTotalCost = holding.quantity * holding.avgCost;
                 const newTotalCost = oldTotalCost - analysis.totalCostBasis;
                 const newAvg = newQty > 0 ? newTotalCost / newQty : 0;
-                
+
                 batch.update(holdingRef, {
                     quantity: newQty,
                     avgCost: newAvg
@@ -610,10 +700,10 @@ export const SellAssetModal = ({ holding, userId, onClose }: any) => {
             const profileRef = doc(db, getUserProfilePath(userId));
             const profileSnap = await getDoc(profileRef);
             const groupId = profileSnap.exists() ? profileSnap.data().currentGroupId : null;
-            
+
             const transRef = collection(db, getCollectionPath(userId, groupId, 'transactions'));
             const newTrans = doc(transRef);
-            
+
             // Need a payer ID (myself)
             const peopleRef = collection(db, getCollectionPath(userId, groupId, 'people'));
             const peopleSnap = await getDocs(query(peopleRef, where('isMe', '==', true)));
@@ -643,36 +733,36 @@ export const SellAssetModal = ({ holding, userId, onClose }: any) => {
 
     return (
         <div className={styles.overlay}><div className={`${styles.content} max-w-lg`}>
-            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">賣出 {holding.symbol}</h3><button onClick={onClose}><X/></button></div>
+            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">賣出 {holding.symbol}</h3><button onClick={onClose}><X /></button></div>
             <div className="grid grid-cols-2 gap-4 mb-4">
-                <div><label className={styles.label}>賣出單價 ({holding.currency})</label><input type="number" className={styles.input} value={price} onChange={e=>setPrice(parseFloat(e.target.value))} /></div>
+                <div><label className={styles.label}>賣出單價 ({holding.currency})</label><input type="number" className={styles.input} value={price} onChange={e => setPrice(parseFloat(e.target.value))} /></div>
                 <div>
                     <label className={styles.label}>賣出模式</label>
                     <div className="flex bg-slate-100 p-1 rounded-xl">
-                        <button onClick={()=>{setMode('fifo'); setLotSelection({});}} className={`flex-1 py-2 text-xs font-bold rounded-lg ${mode==='fifo'?'bg-white shadow text-indigo-600':'text-slate-400'}`}>FIFO (先進先出)</button>
-                        <button onClick={()=>{setMode('specific'); setLotSelection({});}} className={`flex-1 py-2 text-xs font-bold rounded-lg ${mode==='specific'?'bg-white shadow text-indigo-600':'text-slate-400'}`}>指定批次</button>
+                        <button onClick={() => { setMode('fifo'); setLotSelection({}); }} className={`flex-1 py-2 text-xs font-bold rounded-lg ${mode === 'fifo' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}>FIFO (先進先出)</button>
+                        <button onClick={() => { setMode('specific'); setLotSelection({}); }} className={`flex-1 py-2 text-xs font-bold rounded-lg ${mode === 'specific' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}>指定批次</button>
                     </div>
                 </div>
             </div>
 
             {mode === 'fifo' && (
-                <div className="mb-4"><label className={styles.label}>賣出總數量 (持有: {fmt(holding.quantity)})</label><input type="number" className={styles.input} value={sellQty} onChange={e=>setSellQty(e.target.value)} placeholder="輸入數量" /></div>
+                <div className="mb-4"><label className={styles.label}>賣出總數量 (持有: {fmt(holding.quantity)})</label><input type="number" className={styles.input} value={sellQty} onChange={e => setSellQty(e.target.value)} placeholder="輸入數量" /></div>
             )}
 
             <div className="max-h-48 overflow-y-auto border rounded-xl mb-4">
                 <table className="w-full text-xs text-left">
                     <thead className="bg-slate-100 font-bold text-slate-600"><tr><th className="p-2">買入日期</th><th className="p-2">成本</th><th className="p-2">剩餘</th><th className="p-2">賣出</th></tr></thead>
                     <tbody>
-                        {loadingLots ? <tr><td colSpan={4} className="p-4 text-center"><Loader2 className="animate-spin mx-auto"/></td></tr> : lots.map(lot => (
+                        {loadingLots ? <tr><td colSpan={4} className="p-4 text-center"><Loader2 className="animate-spin mx-auto" /></td></tr> : lots.map(lot => (
                             <tr key={lot.id} className="border-b last:border-0">
-                                <td className="p-2 text-slate-500">{lot.id==='legacy'?'Legacy':new Date(lot.date.seconds*1000).toLocaleDateString()}</td>
+                                <td className="p-2 text-slate-500">{lot.id === 'legacy' ? 'Legacy' : new Date(lot.date.seconds * 1000).toLocaleDateString()}</td>
                                 <td className="p-2">{fmt(lot.costPerShare)}</td>
                                 <td className="p-2">{fmt(lot.remainingQuantity, 4)}</td>
                                 <td className="p-2">
                                     {mode === 'fifo' ? (
                                         <span className={lotSelection[lot.id] > 0 ? 'font-bold text-indigo-600' : 'text-slate-300'}>{fmt(lotSelection[lot.id] || 0, 4)}</span>
                                     ) : (
-                                        <input type="number" className="w-16 border rounded p-1 text-right" value={lotSelection[lot.id] || ''} onChange={e => setLotSelection({...lotSelection, [lot.id]: parseFloat(e.target.value)})} />
+                                        <input type="number" className="w-16 border rounded p-1 text-right" value={lotSelection[lot.id] || ''} onChange={e => setLotSelection({ ...lotSelection, [lot.id]: parseFloat(e.target.value) })} />
                                     )}
                                 </td>
                             </tr>
@@ -689,7 +779,7 @@ export const SellAssetModal = ({ holding, userId, onClose }: any) => {
                 </div>
             </div>
 
-            <button onClick={handleConfirm} disabled={submitting || analysis.totalSellQty <= 0} className={`${styles.btnPrimary} w-full`}>{submitting ? <Loader2 className="animate-spin"/> : '確認賣出'}</button>
+            <button onClick={handleConfirm} disabled={submitting || analysis.totalSellQty <= 0} className={`${styles.btnPrimary} w-full`}>{submitting ? <Loader2 className="animate-spin" /> : '確認賣出'}</button>
         </div></div>
     );
 };
@@ -708,12 +798,12 @@ export const EditAssetPriceModal = ({ holding, userId, onClose, onEditInfo, onSe
         <div className={styles.overlay}><div className={styles.content}>
             <div className="flex justify-between items-start mb-4">
                 <div><h3 className="font-bold text-xl">{holding.symbol}</h3><div className="text-xs text-slate-500">現價: {holding.currentPrice} {holding.currency}</div></div>
-                <button onClick={onClose}><X size={20}/></button>
+                <button onClick={onClose}><X size={20} /></button>
             </div>
             <div className="mb-6"><label className={styles.label}>手動報價 ({holding.currency})</label><input type="number" placeholder="自動" className={styles.input} value={manualPrice} onChange={e => setManualPrice(e.target.value)} /></div>
             <div className="grid grid-cols-2 gap-3 mb-4">
-                <button onClick={onEditInfo} className="bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-sm flex flex-col items-center justify-center gap-1 hover:bg-slate-200"><Edit size={16}/> 修改成本/數量</button>
-                <button onClick={onSell} className="bg-indigo-50 text-indigo-600 py-3 rounded-xl font-bold text-sm flex flex-col items-center justify-center gap-1 hover:bg-indigo-100"><Coins size={16}/> 賣出資產</button>
+                <button onClick={onEditInfo} className="bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-sm flex flex-col items-center justify-center gap-1 hover:bg-slate-200"><Edit size={16} /> 修改成本/數量</button>
+                <button onClick={onSell} className="bg-indigo-50 text-indigo-600 py-3 rounded-xl font-bold text-sm flex flex-col items-center justify-center gap-1 hover:bg-indigo-100"><Coins size={16} /> 賣出資產</button>
             </div>
             <button onClick={handleSave} className={`${styles.btnPrimary} w-full`}>儲存價格設定</button>
         </div></div>
@@ -726,13 +816,13 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
     const [amount, setAmount] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [frequency, setFrequency] = useState<'once' | '1' | '3' | '6' | '12'>('once');
-    const [type, setType] = useState<'cash'|'drip'>('cash');
+    const [type, setType] = useState<'cash' | 'drip'>('cash');
     const [addTransaction, setAddTransaction] = useState(true);
 
-    const holding = holdings.find((h:any) => h.id === holdingId);
-    const platform = platforms.find((p:any) => p.id === holding?.platformId);
+    const holding = holdings.find((h: any) => h.id === holdingId);
+    const platform = platforms.find((p: any) => p.id === holding?.platformId);
     const currentPrice = holding ? (holding.manualPrice || holding.currentPrice) : 0;
-    
+
     // Calculation for preview
     const heldShares = holding ? Math.floor(holding.quantity) : 0;
     const dps = parseFloat(amount) || 0;
@@ -740,11 +830,11 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
     const dripShares = (type === 'drip' && totalDividend && currentPrice > 0) ? totalDividend / currentPrice : 0;
 
     const handleSave = async () => {
-        if(!holding || !amount) return;
+        if (!holding || !amount) return;
         const val = parseFloat(amount); // This is Total Amount for Cash, or DPS for DRIP
         const batch = writeBatch(db);
         const dateTs = Timestamp.fromDate(new Date(date));
-        
+
         // Find payer (Me)
         const peopleRef = collection(db, getCollectionPath(userId, groupId, 'people'));
         const peopleSnap = await getDocs(query(peopleRef, where('isMe', '==', true)));
@@ -755,7 +845,7 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
             if (frequency === 'once') {
                 // Immediate Execution
                 if (!currentPrice || currentPrice <= 0) { alert('無法取得股價'); return; }
-                
+
                 // 1. Create Lot
                 const lotRef = doc(collection(db, getCollectionPath(userId, null, 'holdings'), holding.id, 'lots'));
                 batch.set(lotRef, {
@@ -785,8 +875,8 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                         type: 'income',
                         totalAmount: totalDividend,
                         currency: holding.currency,
-                        payers: {[payerId]: totalDividend},
-                        splitDetails: {[payerId]: totalDividend},
+                        payers: { [payerId]: totalDividend },
+                        splitDetails: { [payerId]: totalDividend },
                         note: `DPS: ${val}`
                     });
                 }
@@ -829,14 +919,14 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                         type: 'income',
                         totalAmount: val,
                         currency: holding.currency,
-                        payers: {[payerId]: val},
-                        splitDetails: {[payerId]: val}
+                        payers: { [payerId]: val },
+                        splitDetails: { [payerId]: val }
                     });
                 }
             } else {
                 // Recurring Rule for Cash
                 const interval = parseInt(frequency);
-                const nextDate = new Date(date); 
+                const nextDate = new Date(date);
                 const ruleData = {
                     name: `股利: ${holding.symbol}`,
                     amount: val, // Total Amount
@@ -854,7 +944,7 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                 await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), ruleData);
             }
         }
-        
+
         await batch.commit();
         onClose();
     };
@@ -863,16 +953,16 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
         <div className={styles.overlay}><div className={styles.content}>
             <h3 className="font-bold text-xl mb-4">領取股息</h3>
             <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
-                <button onClick={()=>setType('cash')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='cash'?'bg-white shadow text-emerald-600':'text-slate-400'}`}>現金 (Cash)</button>
-                <button onClick={()=>setType('drip')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type==='drip'?'bg-white shadow text-blue-600':'text-slate-400'}`}>再投入 (DRIP)</button>
+                <button onClick={() => setType('cash')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'cash' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>現金 (Cash)</button>
+                <button onClick={() => setType('drip')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'drip' ? 'bg-white shadow text-blue-600' : 'text-slate-400'}`}>再投入 (DRIP)</button>
             </div>
             <div className="space-y-4">
-                <div><label className={styles.label}>標的</label><select className={styles.input} value={holdingId} onChange={e=>setHoldingId(e.target.value)}>{holdings.map((h:any)=><option key={h.id} value={h.id}>{h.symbol}</option>)}</select></div>
+                <div><label className={styles.label}>標的</label><select className={styles.input} value={holdingId} onChange={e => setHoldingId(e.target.value)}>{holdings.map((h: any) => <option key={h.id} value={h.id}>{h.symbol}</option>)}</select></div>
                 <div>
                     <label className={styles.label}>
                         {type === 'drip' ? `每股股息 (DPS)` : `股息總金額`} ({platform?.currency})
                     </label>
-                    <input type="number" className={styles.input} value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0.00" />
+                    <input type="number" className={styles.input} value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
                     {type === 'drip' && holding && amount && (
                         <div className="text-xs bg-slate-50 p-2 rounded mt-1 text-slate-600 space-y-1">
                             <div>持有股數 (整數): {heldShares}</div>
@@ -881,9 +971,9 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                         </div>
                     )}
                 </div>
-                
-                <div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e=>setDate(e.target.value)} /></div>
-                
+
+                <div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e => setDate(e.target.value)} /></div>
+
                 <div>
                     <label className={styles.label}>頻率</label>
                     <div className="grid grid-cols-3 gap-2">
@@ -915,19 +1005,19 @@ export const AddAccountModal = ({ userId, onClose, editData }: any) => {
     const [currency, setCurrency] = useState(editData?.currency || 'TWD');
     const [initialBalance, setInitialBalance] = useState(editData?.initialBalance?.toString() || '0');
     const handleSave = async () => {
-         const data = { name, currency, initialBalance: parseFloat(initialBalance) || 0 };
-         if(editData) await updateDoc(doc(db, getCollectionPath(userId, null, 'accounts'), editData.id), data);
-         else await addDoc(collection(db, getCollectionPath(userId, null, 'accounts')), data);
-         onClose();
+        const data = { name, currency, initialBalance: parseFloat(initialBalance) || 0 };
+        if (editData) await updateDoc(doc(db, getCollectionPath(userId, null, 'accounts'), editData.id), data);
+        else await addDoc(collection(db, getCollectionPath(userId, null, 'accounts')), data);
+        onClose();
     };
     return (
         <div className={styles.overlay}><div className={styles.content}>
-            <h3 className="font-bold text-xl mb-4">{editData?'編輯帳戶':'新增銀行帳戶'}</h3>
+            <h3 className="font-bold text-xl mb-4">{editData ? '編輯帳戶' : '新增銀行帳戶'}</h3>
             <div className="space-y-4">
-                <div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e=>setName(e.target.value)}/></div>
+                <div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e => setName(e.target.value)} /></div>
                 <div className="grid grid-cols-2 gap-3">
-                     <div><label className={styles.label}>幣別</label><select className={styles.input} value={currency} onChange={e=>setCurrency(e.target.value)}><option>TWD</option><option>USD</option><option>JPY</option></select></div>
-                     <div><label className={styles.label}>初始餘額</label><input type="number" className={styles.input} value={initialBalance} onChange={e=>setInitialBalance(e.target.value)}/></div>
+                    <div><label className={styles.label}>幣別</label><select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value)}><option>TWD</option><option>USD</option><option>JPY</option></select></div>
+                    <div><label className={styles.label}>初始餘額</label><input type="number" className={styles.input} value={initialBalance} onChange={e => setInitialBalance(e.target.value)} /></div>
                 </div>
                 <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div>
             </div>
@@ -939,17 +1029,17 @@ export const AddCardModal = ({ userId, onClose, editData }: any) => {
     const [name, setName] = useState(editData?.name || '');
     const [billingDay, setBillingDay] = useState(editData?.billingDay?.toString() || '1');
     const handleSave = async () => {
-         const data = { name, billingDay: parseInt(billingDay) };
-         if(editData) await updateDoc(doc(db, getCollectionPath(userId, null, 'creditCards'), editData.id), data);
-         else await addDoc(collection(db, getCollectionPath(userId, null, 'creditCards')), data);
-         onClose();
+        const data = { name, billingDay: parseInt(billingDay) };
+        if (editData) await updateDoc(doc(db, getCollectionPath(userId, null, 'creditCards'), editData.id), data);
+        else await addDoc(collection(db, getCollectionPath(userId, null, 'creditCards')), data);
+        onClose();
     };
     return (
         <div className={styles.overlay}><div className={styles.content}>
-            <h3 className="font-bold text-xl mb-4">{editData?'編輯信用卡':'新增信用卡'}</h3>
+            <h3 className="font-bold text-xl mb-4">{editData ? '編輯信用卡' : '新增信用卡'}</h3>
             <div className="space-y-4">
-                <div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e=>setName(e.target.value)}/></div>
-                <div><label className={styles.label}>結帳日 (每月幾號)</label><input type="number" min="1" max="31" className={styles.input} value={billingDay} onChange={e=>setBillingDay(e.target.value)}/></div>
+                <div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e => setName(e.target.value)} /></div>
+                <div><label className={styles.label}>結帳日 (每月幾號)</label><input type="number" min="1" max="31" className={styles.input} value={billingDay} onChange={e => setBillingDay(e.target.value)} /></div>
                 <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div>
             </div>
         </div></div>
@@ -960,20 +1050,20 @@ export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
     const [qty, setQty] = useState(holding.quantity.toString());
     const [avgCost, setAvgCost] = useState(holding.avgCost.toString());
     const handleSave = async () => {
-         await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), {
-             quantity: parseFloat(qty),
-             avgCost: parseFloat(avgCost)
-         });
-         onClose();
+        await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), {
+            quantity: parseFloat(qty),
+            avgCost: parseFloat(avgCost)
+        });
+        onClose();
     };
     return (
         <div className={styles.overlay}><div className={styles.content}>
             <h3 className="font-bold text-xl mb-4">編輯資產: {holding.symbol}</h3>
             <div className="space-y-4">
-                <div><label className={styles.label}>持有數量</label><input type="number" className={styles.input} value={qty} onChange={e=>setQty(e.target.value)}/></div>
-                <div><label className={styles.label}>平均成本</label><input type="number" className={styles.input} value={avgCost} onChange={e=>setAvgCost(e.target.value)}/></div>
+                <div><label className={styles.label}>持有數量</label><input type="number" className={styles.input} value={qty} onChange={e => setQty(e.target.value)} /></div>
+                <div><label className={styles.label}>平均成本</label><input type="number" className={styles.input} value={avgCost} onChange={e => setAvgCost(e.target.value)} /></div>
                 <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div>
-                <button onClick={()=>onDelete(holding)} className="w-full text-red-500 text-sm font-bold mt-2">刪除此資產</button>
+                <button onClick={() => onDelete(holding)} className="w-full text-red-500 text-sm font-bold mt-2">刪除此資產</button>
             </div>
         </div></div>
     );
@@ -981,11 +1071,11 @@ export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
 
 export const TransferModal = ({ userId, accounts, onClose }: any) => {
     const [fromId, setFromId] = useState(accounts[0]?.id || '');
-    const [toId, setToId] = useState(accounts.length>1 ? accounts[1].id : '');
+    const [toId, setToId] = useState(accounts.length > 1 ? accounts[1].id : '');
     const [amount, setAmount] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const handleSave = async () => {
-        if(!fromId || !toId || !amount || fromId === toId) return;
+        if (!fromId || !toId || !amount || fromId === toId) return;
         const val = parseFloat(amount);
         const batch = writeBatch(db);
         const logsRef = collection(db, getCollectionPath(userId, null, 'bankLogs'));
@@ -996,18 +1086,18 @@ export const TransferModal = ({ userId, accounts, onClose }: any) => {
         onClose();
     };
     return (
-         <div className={styles.overlay}><div className={styles.content}>
+        <div className={styles.overlay}><div className={styles.content}>
             <h3 className="font-bold text-xl mb-4">內部轉帳</h3>
             <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
-                    <div><label className={styles.label}>轉出帳戶</label><select className={styles.input} value={fromId} onChange={e=>setFromId(e.target.value)}>{accounts.map((a:any)=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
-                    <div><label className={styles.label}>轉入帳戶</label><select className={styles.input} value={toId} onChange={e=>setToId(e.target.value)}>{accounts.map((a:any)=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+                    <div><label className={styles.label}>轉出帳戶</label><select className={styles.input} value={fromId} onChange={e => setFromId(e.target.value)}>{accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+                    <div><label className={styles.label}>轉入帳戶</label><select className={styles.input} value={toId} onChange={e => setToId(e.target.value)}>{accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
                 </div>
-                <div><label className={styles.label}>金額</label><input type="number" className={styles.input} value={amount} onChange={e=>setAmount(e.target.value)}/></div>
-                <div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e=>setDate(e.target.value)}/></div>
+                <div><label className={styles.label}>金額</label><input type="number" className={styles.input} value={amount} onChange={e => setAmount(e.target.value)} /></div>
+                <div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e => setDate(e.target.value)} /></div>
                 <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認轉帳</button></div>
             </div>
-         </div></div>
+        </div></div>
     );
 };
 
@@ -1114,17 +1204,17 @@ export const CardDetailModal = ({ userId, card, cardLogs, allCardLogs, transacti
     const currentCycleEnd = new Date(currentCycleStart); currentCycleEnd.setMonth(currentCycleEnd.getMonth() + 1); currentCycleEnd.setDate(currentCycleEnd.getDate() - 1);
     const prevCycle = () => { const d = new Date(viewStart); d.setMonth(d.getMonth() - 1); setViewStart(d.toISOString().split('T')[0]); };
     const nextCycle = () => { const d = new Date(viewStart); d.setMonth(d.getMonth() + 1); setViewStart(d.toISOString().split('T')[0]); };
-    
+
     // Sort and Filter Transactions for Linking
     const availableTrans = useMemo(() => {
         if (!linkLog) return [];
-        
+
         const logDate = linkLog.date?.seconds ? new Date(linkLog.date.seconds * 1000).toISOString().split('T')[0] : '';
         const logAmount = linkLog.amount;
 
         // 1. Filter: Exclude transactions already linked to OTHER logs (but include if we were re-linking - though UI currently doesn't support re-link flow directly without unlinking first)
         const globalUsedIds = allCardLogs.filter((cl: any) => cl.id !== linkLog.id && cl.linkedTransactionId).map((cl: any) => cl.linkedTransactionId);
-        
+
         // Use ALL transactions (no slice limit) that aren't used elsewhere
         let candidates = transactions.filter((t: any) => !globalUsedIds.includes(t.id));
 
@@ -1167,64 +1257,64 @@ export const CardDetailModal = ({ userId, card, cardLogs, allCardLogs, transacti
     const handleEditClick = (log: any) => { setEditingId(log.id); setAmt(log.amount.toString()); setDesc(log.description); setDate(new Date((log.date.seconds as number) * 1000).toISOString().split('T')[0]); setShowAddLog(true); };
     const handleDeleteClick = async (id: string) => { if (window.confirm('確定要刪除此筆刷卡紀錄嗎？(需二次確認)')) { await deleteDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), id)); if (editingId === id) { setShowAddLog(false); setEditingId(null); } } };
     const linkTrans = async (transId: string) => { if (!linkLog) return; await updateDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), linkLog.id), { isReconciled: true, linkedTransactionId: transId }); setLinkLog(null); }
-    
-    return (<div className={styles.overlay}> {linkLog ? (<div className={styles.content}> 
-        <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">連結記帳資料 (對帳)</h3><button onClick={() => setLinkLog(null)}><X /></button></div> 
+
+    return (<div className={styles.overlay}> {linkLog ? (<div className={styles.content}>
+        <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">連結記帳資料 (對帳)</h3><button onClick={() => setLinkLog(null)}><X /></button></div>
         <div className="bg-slate-50 p-3 rounded-xl mb-4 border border-indigo-100">
             <div className="text-xs text-slate-500 mb-1">正在為此筆刷卡紀錄尋找對應記帳：</div>
             <div className="font-bold text-indigo-700 flex justify-between">
                 <span>{linkLog.description}</span>
                 <span>${linkLog.amount}</span>
             </div>
-            <div className="text-xs text-slate-400 text-right">{new Date((linkLog.date.seconds as number)*1000).toLocaleDateString()}</div>
+            <div className="text-xs text-slate-400 text-right">{new Date((linkLog.date.seconds as number) * 1000).toLocaleDateString()}</div>
         </div>
-        <div className="space-y-2 max-h-80 overflow-y-auto"> 
+        <div className="space-y-2 max-h-80 overflow-y-auto">
             {availableTrans.length === 0 && <div className="text-center py-8 text-slate-400 text-sm">無可連結的記帳資料</div>}
             {availableTrans.map((t: any) => {
                 const isAmountMatch = Math.abs(t.totalAmount - linkLog.amount) < 0.1;
                 return (
-                    <div key={t.id} onClick={() => linkTrans(t.id)} className={`p-3 border rounded-xl cursor-pointer flex justify-between items-center transition-all ${isAmountMatch ? 'bg-emerald-50/50 border-emerald-200 hover:border-emerald-400' : 'bg-white border-slate-100 hover:border-indigo-400'}`}> 
-                        <div> 
+                    <div key={t.id} onClick={() => linkTrans(t.id)} className={`p-3 border rounded-xl cursor-pointer flex justify-between items-center transition-all ${isAmountMatch ? 'bg-emerald-50/50 border-emerald-200 hover:border-emerald-400' : 'bg-white border-slate-100 hover:border-indigo-400'}`}>
+                        <div>
                             <div className="font-bold text-sm flex items-center gap-2">
-                                {t.description} 
+                                {t.description}
                                 {isAmountMatch && <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded-full">金額相符</span>}
-                            </div> 
-                            <div className="text-xs text-slate-400 font-bold">{t.date?.seconds ? new Date(t.date.seconds * 1000).toLocaleDateString() : ''}</div> 
-                        </div> 
-                        <div className={`font-bold ${isAmountMatch ? 'text-emerald-600' : 'text-slate-700'}`}>${t.totalAmount}</div> 
+                            </div>
+                            <div className="text-xs text-slate-400 font-bold">{t.date?.seconds ? new Date(t.date.seconds * 1000).toLocaleDateString() : ''}</div>
+                        </div>
+                        <div className={`font-bold ${isAmountMatch ? 'text-emerald-600' : 'text-slate-700'}`}>${t.totalAmount}</div>
                     </div>
                 )
-            })} 
-        </div> 
+            })}
+        </div>
     </div>) : (<div className={`${styles.content} h-[85vh]`}> <div className="flex justify-between items-center mb-4"> <div><h3 className="font-bold text-xl">{card.name}</h3><div className="text-xs text-slate-500">結帳日: 每月 {card.billingDay} 號</div></div> <button onClick={onClose}><X /></button> </div> <div className="flex items-center justify-between bg-slate-100 p-2 rounded-xl mb-4"> <button onClick={prevCycle} className="p-1 hover:bg-white rounded">◀</button> <div className="text-xs font-bold text-slate-600">{currentCycleStart.toLocaleDateString()} ~ {currentCycleEnd.toLocaleDateString()}</div> <button onClick={nextCycle} className="p-1 hover:bg-white rounded">▶</button> </div> <button onClick={() => { setShowAddLog(!showAddLog); setEditingId(null); setAmt(''); setDesc(''); }} className="w-full py-2 mb-4 border-2 border-dashed border-indigo-200 text-indigo-600 rounded-xl font-bold text-sm">{showAddLog && !editingId ? '隱藏新增' : '+ 新增刷卡紀錄'}</button> {showAddLog && (<div className="bg-slate-50 p-4 rounded-xl border mb-4 space-y-2 animate-in slide-in-from-bottom-4"> <div className="text-xs font-bold text-indigo-500 mb-1">{editingId ? '編輯紀錄' : '新增紀錄'}</div> <div className="flex gap-2"> <div className="flex-1"><label className={styles.label}>日期</label><input type="date" className="w-full p-2 rounded border text-sm" value={date} onChange={e => setDate(e.target.value)} /></div> <div className="flex-1"><label className={styles.label}>金額</label><input type="number" className="w-full p-2 rounded border text-sm" value={amt} onChange={e => setAmt(e.target.value)} /></div> </div> <div><label className={styles.label}>說明</label><div className="flex gap-2"><input className="flex-1 p-2 rounded border text-sm" value={desc} onChange={e => setDesc(e.target.value)} /><button onClick={handleSaveLog} className="bg-indigo-600 text-white px-4 rounded text-xs font-bold">{editingId ? '更新' : '存'}</button></div></div> </div>)} <div className="space-y-2 max-h-[50vh] overflow-y-auto"> {viewLogs.length === 0 && <div className="text-center text-slate-400 py-4">此週期無紀錄</div>} {viewLogs.map((log: any) => { const linkedT = transactions.find((t: any) => t.id === log.linkedTransactionId); return (<div key={log.id} className={`p-3 rounded-xl border ${log.isReconciled ? 'bg-emerald-50/50 border-emerald-100' : 'bg-white border-slate-200'}`}> <div className="flex justify-between items-center mb-1"> <div className="flex items-center gap-2"> <button onClick={async () => { await updateDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), log.id), { isReconciled: !log.isReconciled }) }}>{log.isReconciled ? <CheckCircle size={18} className="text-emerald-500" /> : <Circle size={18} className="text-slate-300" />}</button> <span className={`text-sm font-bold ${log.isReconciled ? 'text-slate-400 line-through' : ''}`}>{log.description}</span> </div> <div className="font-bold font-mono">${log.amount}</div> </div> <div className="flex justify-between items-center pl-7"> <div className="text-[10px] text-slate-400">{new Date((log.date.seconds as number) * 1000).toLocaleDateString()}</div> <div className="flex items-center gap-2"> {!log.isReconciled && <button onClick={() => setLinkLog(log)} className="text-[10px] flex gap-1 bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold"><LinkIcon size={10} /> 連結</button>} {log.isReconciled && linkedT && <span className="text-[10px] text-emerald-600 flex gap-1 bg-emerald-50 px-2 py-1 rounded"><Link2 size={10} /> {linkedT.description}</span>} <button onClick={() => handleEditClick(log)} className="text-slate-400 hover:text-indigo-600"><Edit size={12} /></button> <button onClick={() => handleDeleteClick(log.id)} className="text-slate-400 hover:text-red-600"><Trash2 size={12} /></button> </div> </div> </div>) })} </div> </div>)} </div>)
 }
 
 export const AIAssistantModal = ({ onClose, contextData }: any) => {
-    const [messages, setMessages] = useState<ChatMessage[]>([{role:'model', text:'你好！我是您的財務助理。有關您的資產或記帳問題都可以問我。'}]);
+    const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'model', text: '你好！我是您的財務助理。有關您的資產或記帳問題都可以問我。' }]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const handleSend = async () => {
-        if(!input) return;
+        if (!input) return;
         const userMsg = input;
-        setMessages(p=>[...p, {role:'user', text:userMsg}]);
+        setMessages(p => [...p, { role: 'user', text: userMsg }]);
         setInput('');
         setLoading(true);
         try {
             const context = `User Net Worth: ${contextData.totalNetWorth}. Holdings: ${contextData.holdings.length}. Transactions: ${contextData.transactions.length}.`;
             const prompt = `Context: ${context}. User Question: ${userMsg}. Answer in Traditional Chinese, be helpful and concise.`;
             const res = await callGemini(prompt);
-            setMessages(p=>[...p, {role:'model', text: res || 'Error'}]);
-        } catch(e) { setMessages(p=>[...p, {role:'model', text: 'Sorry, AI error.'}]); }
+            setMessages(p => [...p, { role: 'model', text: res || 'Error' }]);
+        } catch (e) { setMessages(p => [...p, { role: 'model', text: 'Sorry, AI error.' }]); }
         setLoading(false);
     };
     return (
         <div className={styles.overlay}><div className={`${styles.content} h-[600px] flex flex-col`}>
-            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl flex items-center gap-2"><Sparkles className="text-indigo-600"/> AI 助理</h3><button onClick={onClose}><X size={20}/></button></div>
+            <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl flex items-center gap-2"><Sparkles className="text-indigo-600" /> AI 助理</h3><button onClick={onClose}><X size={20} /></button></div>
             <div className="flex-1 overflow-y-auto space-y-3 mb-4 p-2 bg-slate-50 rounded-xl">
-                {messages.map((m,i)=>(<div key={i} className={`p-3 rounded-xl text-sm max-w-[80%] ${m.role==='user'?'bg-indigo-600 text-white self-end ml-auto':'bg-white text-slate-700 shadow-sm'}`}>{m.text}</div>))}
-                {loading && <div className="p-3 bg-white rounded-xl shadow-sm w-fit"><Loader2 className="animate-spin" size={16}/></div>}
+                {messages.map((m, i) => (<div key={i} className={`p-3 rounded-xl text-sm max-w-[80%] ${m.role === 'user' ? 'bg-indigo-600 text-white self-end ml-auto' : 'bg-white text-slate-700 shadow-sm'}`}>{m.text}</div>))}
+                {loading && <div className="p-3 bg-white rounded-xl shadow-sm w-fit"><Loader2 className="animate-spin" size={16} /></div>}
             </div>
-            <div className="flex gap-2"><input className={styles.input} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSend()} placeholder="輸入問題..."/><button onClick={handleSend} disabled={loading} className="bg-indigo-600 text-white p-3 rounded-xl"><Send size={20}/></button></div>
+            <div className="flex gap-2"><input className={styles.input} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSend()} placeholder="輸入問題..." /><button onClick={handleSend} disabled={loading} className="bg-indigo-600 text-white p-3 rounded-xl"><Send size={20} /></button></div>
         </div></div>
     );
 };
@@ -1279,9 +1369,9 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
         setLoading(true);
         try {
             let prompt = "";
-            
+
             let contentToAnalyze = mode === 'image' ? imagePreview! : textInput;
-            
+
             if (mode !== 'image') {
                 contentToAnalyze = contentToAnalyze.replace(/(\d{3})[\/\-](\d{1,2})[\/\-](\d{1,2})/g, (match, y, m, d) => {
                     const year = parseInt(y);
@@ -1319,11 +1409,11 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                     amt = parseFloat(amt.replace(/,/g, ''));
                 }
                 it.amount = amt || 0;
-                
+
                 if (!it.date) it.date = new Date().toISOString().split('T')[0];
 
                 const isDup = checkDuplicate(it);
-                
+
                 const isFuture = new Date(it.date) > now;
                 const isLarge = it.amount > 100000;
                 const isAnomaly = isFuture || isLarge;
@@ -1331,7 +1421,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                 return {
                     ...it,
                     id: Math.random().toString(36).substr(2, 9),
-                    selected: !isDup && !isAnomaly, 
+                    selected: !isDup && !isAnomaly,
                     isDuplicate: isDup,
                     isAnomaly: isAnomaly
                 };

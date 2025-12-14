@@ -73,18 +73,18 @@ export default function App() {
       const params = new URLSearchParams(window.location.search);
       const source = params.get('source');
       if (source === 'shortcut-add') {
-          setActiveTab('ledger');
-          setActiveModal('add-trans');
-          setNotification("已透過捷徑快速啟動：記一筆");
-          setTimeout(() => setNotification(null), 4000);
-          window.history.replaceState({}, '', '/');
+         setActiveTab('ledger');
+         setActiveModal('add-trans');
+         setNotification("已透過捷徑快速啟動：記一筆");
+         setTimeout(() => setNotification(null), 4000);
+         window.history.replaceState({}, '', '/');
       } else if (source === 'shortcut-scan') {
-          setActiveTab('ledger');
-          setBatchConfig({ target: 'ledger' });
-          setActiveModal('ai-batch');
-          setNotification("已透過捷徑快速啟動：掃描發票");
-          setTimeout(() => setNotification(null), 4000);
-          window.history.replaceState({}, '', '/');
+         setActiveTab('ledger');
+         setBatchConfig({ target: 'ledger' });
+         setActiveModal('ai-batch');
+         setNotification("已透過捷徑快速啟動：掃描發票");
+         setTimeout(() => setNotification(null), 4000);
+         window.history.replaceState({}, '', '/');
       }
 
       if (!auth) {
@@ -113,13 +113,13 @@ export default function App() {
       });
 
       const groupsQuery = query(
-          collection(db, 'artifacts/wealthflow-stable-restore/groups'), 
-          where('members', 'array-contains', user.uid)
+         collection(db, 'artifacts/wealthflow-stable-restore/groups'),
+         where('members', 'array-contains', user.uid)
       );
-      
+
       const unsubGroups = onSnapshot(groupsQuery, (snap) => {
-          const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Group[];
-          setUserGroups(list);
+         const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Group[];
+         setUserGroups(list);
       });
 
       return () => { unsubProfile(); unsubGroups(); };
@@ -141,8 +141,8 @@ export default function App() {
    // Check Recurring Rules (Hourly)
    useEffect(() => {
       if (!user || recurringRules.length === 0) return;
-      const interval = setInterval(() => { checkRecurringRules(); }, 60 * 60 * 1000); 
-      checkRecurringRules(); 
+      const interval = setInterval(() => { checkRecurringRules(); }, 60 * 60 * 1000);
+      checkRecurringRules();
       return () => clearInterval(interval);
    }, [recurringRules, user]);
 
@@ -162,49 +162,49 @@ export default function App() {
             let transactionAmount = rule.amount;
 
             if (rule.isDRIP && rule.linkedHoldingId) {
-                shouldUpdateCash = false;
-                try {
-                    const holdingRef = doc(db, getCollectionPath(user!.uid, null, 'holdings'), rule.linkedHoldingId);
-                    const holdingSnap = await getDoc(holdingRef);
-                    if (holdingSnap.exists()) {
-                        const h = holdingSnap.data() as AssetHolding;
-                        const heldShares = Math.floor(h.quantity);
-                        const dividendPerShare = rule.amount;
-                        const totalDividendAmount = heldShares * dividendPerShare;
-                        transactionAmount = totalDividendAmount;
+               shouldUpdateCash = false;
+               try {
+                  const holdingRef = doc(db, getCollectionPath(user!.uid, null, 'holdings'), rule.linkedHoldingId);
+                  const holdingSnap = await getDoc(holdingRef);
+                  if (holdingSnap.exists()) {
+                     const h = holdingSnap.data() as AssetHolding;
+                     const heldShares = Math.floor(h.quantity);
+                     const dividendPerShare = rule.amount;
+                     const totalDividendAmount = heldShares * dividendPerShare;
+                     transactionAmount = totalDividendAmount;
 
-                        let price = h.manualPrice;
-                        if (!price) {
-                            if (h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
-                            else price = await fetchStockPrice(h.symbol, apiKey);
-                        }
-                        if (!price || price <= 0) price = h.currentPrice;
-                        
-                        if (price && price > 0) {
-                            const newShares = totalDividendAmount / price;
-                            // NOTE: For pure automation we are simplifying. Ideally we create a Lot here too.
-                            // But accessing subcollections in a loop is complex. 
-                            // We'll just update aggregate for automated DRIP for now, 
-                            // or implement Lot creation in `Modals` when user triggers it manually.
-                            // Automation is tricky for subcollections without batch logic here.
-                            // Let's stick to updating aggregate for automation to keep it reliable.
-                            
-                            const oldTotalCost = h.quantity * h.avgCost;
-                            const newTotalCost = oldTotalCost + totalDividendAmount;
-                            const newQty = h.quantity + newShares;
-                            const newAvgCost = newTotalCost / newQty;
-                            
-                            await updateDoc(holdingRef, {
-                                quantity: newQty,
-                                avgCost: newAvgCost,
-                                currentPrice: price
-                            });
-                            transDesc = `股息自動再投入 (DRIP): ${h.symbol} (DPS:${dividendPerShare}, 總額:${totalDividendAmount.toFixed(2)} -> 買入${newShares.toFixed(4)}股 @ ${price})`;
-                        } else {
-                            transDesc = `股息再投入異常: ${h.symbol} (無法取得股價)`;
-                        }
-                    }
-                } catch (e) { console.error("DRIP Error", e); }
+                     let price = h.manualPrice;
+                     if (!price) {
+                        if (h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
+                        else price = await fetchStockPrice(h.symbol, apiKey);
+                     }
+                     if (!price || price <= 0) price = h.currentPrice;
+
+                     if (price && price > 0) {
+                        const newShares = totalDividendAmount / price;
+                        // NOTE: For pure automation we are simplifying. Ideally we create a Lot here too.
+                        // But accessing subcollections in a loop is complex. 
+                        // We'll just update aggregate for automated DRIP for now, 
+                        // or implement Lot creation in `Modals` when user triggers it manually.
+                        // Automation is tricky for subcollections without batch logic here.
+                        // Let's stick to updating aggregate for automation to keep it reliable.
+
+                        const oldTotalCost = h.quantity * h.avgCost;
+                        const newTotalCost = oldTotalCost + totalDividendAmount;
+                        const newQty = h.quantity + newShares;
+                        const newAvgCost = newTotalCost / newQty;
+
+                        await updateDoc(holdingRef, {
+                           quantity: newQty,
+                           avgCost: newAvgCost,
+                           currentPrice: price
+                        });
+                        transDesc = `股息自動再投入 (DRIP): ${h.symbol} (DPS:${dividendPerShare}, 總額:${totalDividendAmount.toFixed(2)} -> 買入${newShares.toFixed(4)}股 @ ${price})`;
+                     } else {
+                        transDesc = `股息再投入異常: ${h.symbol} (無法取得股價)`;
+                     }
+                  }
+               } catch (e) { console.error("DRIP Error", e); }
             }
 
             const newTrans = {
@@ -216,8 +216,8 @@ export default function App() {
             await addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'transactions')), newTrans);
 
             if (rule.linkedPlatformId && shouldUpdateCash) {
-                const platformRef = doc(db, getCollectionPath(user!.uid, null, 'platforms'), rule.linkedPlatformId);
-                await updateDoc(platformRef, { balance: increment(rule.amount) });
+               const platformRef = doc(db, getCollectionPath(user!.uid, null, 'platforms'), rule.linkedPlatformId);
+               await updateDoc(platformRef, { balance: increment(rule.amount) });
             }
 
             const interval = rule.intervalMonths || 1;
@@ -266,8 +266,8 @@ export default function App() {
 
    const totalNetWorth = useMemo(() => {
       const investVal = holdings.reduce((acc, h) => {
-          const price = h.manualPrice ?? h.currentPrice;
-          return acc + convert(h.quantity * price, h.currency, baseCurrency, rates);
+         const price = h.manualPrice ?? h.currentPrice;
+         return acc + convert(h.quantity * price, h.currency, baseCurrency, rates);
       }, 0);
       const platformCashVal = platforms.reduce((acc, p) => acc + convert(p.balance, p.currency, baseCurrency, rates), 0);
       const cashVal = calculatedAccounts.reduce((acc, a) => acc + convert(a.currentBalance || 0, a.currency, baseCurrency, rates), 0);
@@ -285,9 +285,9 @@ export default function App() {
          let price = null;
          if (h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
          else { price = await fetchStockPrice(h.symbol, currentKey); if (!price) errors.push(h.symbol); }
-         if (price) { 
-             await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price }); 
-             updated++; 
+         if (price) {
+            await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price });
+            updated++;
          }
       }
       if (showFeedback && errors.length > 0) alert(`更新完成，但部分失敗: ${errors.join(', ')}`);
@@ -340,24 +340,24 @@ export default function App() {
    };
 
    const handleCreateGroup = async (name: string) => {
-       if (!user || !name) return;
-       try {
-           const groupsCol = collection(db, 'artifacts/wealthflow-stable-restore/groups');
-           const newGroupRef = await addDoc(groupsCol, { name: name, ownerId: user.uid, createdAt: serverTimestamp(), members: [user.uid] });
-           const cats = ['飲食','交通','購物','娛樂','居住'];
-           const catCol = collection(db, getCollectionPath(user.uid, newGroupRef.id, 'categories'));
-           for(const c of cats) await addDoc(catCol, { name: c, type: 'expense' });
-           await addDoc(catCol, { name: '薪水', type: 'income' });
-           const peopleCol = collection(db, getCollectionPath(user.uid, newGroupRef.id, 'people'));
-           await addDoc(peopleCol, { name: user.displayName || user.email?.split('@')[0] || 'Me', isMe: true, uid: user.uid, email: user.email });
-           await updateDoc(doc(db, getUserProfilePath(user.uid)), { currentGroupId: newGroupRef.id });
-           alert('新帳本建立成功！');
-       } catch (e) { console.error(e); alert('建立失敗'); }
+      if (!user || !name) return;
+      try {
+         const groupsCol = collection(db, 'artifacts/wealthflow-stable-restore/groups');
+         const newGroupRef = await addDoc(groupsCol, { name: name, ownerId: user.uid, createdAt: serverTimestamp(), members: [user.uid] });
+         const cats = ['飲食', '交通', '購物', '娛樂', '居住'];
+         const catCol = collection(db, getCollectionPath(user.uid, newGroupRef.id, 'categories'));
+         for (const c of cats) await addDoc(catCol, { name: c, type: 'expense' });
+         await addDoc(catCol, { name: '薪水', type: 'income' });
+         const peopleCol = collection(db, getCollectionPath(user.uid, newGroupRef.id, 'people'));
+         await addDoc(peopleCol, { name: user.displayName || user.email?.split('@')[0] || 'Me', isMe: true, uid: user.uid, email: user.email });
+         await updateDoc(doc(db, getUserProfilePath(user.uid)), { currentGroupId: newGroupRef.id });
+         alert('新帳本建立成功！');
+      } catch (e) { console.error(e); alert('建立失敗'); }
    };
 
    const handleSwitchGroup = async (groupId: string) => {
-       if (!user || !groupId) return;
-       try { await updateDoc(doc(db, getUserProfilePath(user.uid)), { currentGroupId: groupId }); } catch (e) { console.error("Switch failed", e); }
+      if (!user || !groupId) return;
+      try { await updateDoc(doc(db, getUserProfilePath(user.uid)), { currentGroupId: groupId }); } catch (e) { console.error("Switch failed", e); }
    };
 
    if (!auth) return <div className="h-screen flex items-center justify-center flex-col gap-4 text-slate-600"><div className="text-xl font-bold">Configuration Error</div><div className="text-sm">Firebase API Key not found.</div></div>;
@@ -376,7 +376,7 @@ export default function App() {
             <div className="px-4 pt-4 pb-2 flex justify-between items-center border-b border-slate-800/50"><div className="flex items-center gap-2.5 text-white"><div className="bg-indigo-600 p-1.5 rounded-lg shadow-lg shadow-indigo-500/30"><Wallet size={18} className="text-white" /></div><span className="font-bold text-lg tracking-tight">WealthFlow</span></div><button onClick={() => setActiveModal('settings')} className="text-slate-400 hover:text-white transition-colors p-1 rounded-full hover:bg-slate-800"><Settings size={20} /></button></div>
             <div className="px-4 py-2 flex justify-between items-center text-xs text-slate-400 border-b border-slate-800">
                <div className="flex items-center gap-2 w-full">
-                  <div className="relative max-w-[60%]"><select value={currentGroupId || ''} onChange={(e) => handleSwitchGroup(e.target.value)} className="appearance-none bg-slate-800 border border-slate-700 text-white py-1 pl-3 pr-8 rounded-lg text-xs font-bold outline-none w-full truncate focus:border-indigo-500 transition-colors">{userGroups.map(g => (<option key={g.id} value={g.id}>{g.name} {g.id === user.uid ? '(個人)' : ''}</option>))}</select><ChevronDown size={12} className="absolute right-2 top-1.5 text-slate-400 pointer-events-none"/></div>
+                  <div className="relative max-w-[60%]"><select value={currentGroupId || ''} onChange={(e) => handleSwitchGroup(e.target.value)} className="appearance-none bg-slate-800 border border-slate-700 text-white py-1 pl-3 pr-8 rounded-lg text-xs font-bold outline-none w-full truncate focus:border-indigo-500 transition-colors">{userGroups.map(g => (<option key={g.id} value={g.id}>{g.name} {g.id === user.uid ? '(個人)' : ''}</option>))}</select><ChevronDown size={12} className="absolute right-2 top-1.5 text-slate-400 pointer-events-none" /></div>
                   <div className="flex-1"></div>
                   <select value={baseCurrency} onChange={e => setBaseCurrency(e.target.value)} className="bg-slate-800 rounded px-2 py-1 text-white text-xs outline-none border border-slate-700 focus:border-indigo-500">{ALLOWED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select>
                </div>
@@ -408,7 +408,7 @@ export default function App() {
                <NavBtn icon={<Wallet size={20} />} label="資金" active={activeTab === 'cash'} onClick={() => setActiveTab('cash')} />
             </div>
          </nav>
-         {activeModal === 'settings' && <SettingsModal onClose={() => setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} onGroupCreate={handleCreateGroup} onGroupSwitch={handleSwitchGroup} currentGroupId={currentGroupId} groups={userGroups} user={user} categories={categories} onAddCategory={(name: string, type: string, budget: number) => addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'categories')), { name, type, budgetLimit: budget || 0 })} onDeleteCategory={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id)), '確定刪除此分類? (需二次確認)')} />}
+         {activeModal === 'settings' && <SettingsModal onClose={() => setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} onGroupCreate={handleCreateGroup} onGroupSwitch={handleSwitchGroup} currentGroupId={currentGroupId} groups={userGroups} user={user} categories={categories} onAddCategory={(name: string, type: string, budget: number) => addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'categories')), { name, type, budgetLimit: budget || 0 })} onUpdateCategory={(id: string, data: any) => updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id), data)} onDeleteCategory={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id)), '確定刪除此分類? (需二次確認)')} />}
          {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal(null); setSelectedItem(null) }} editData={selectedItem} rates={rates} convert={convert} />}
          {activeModal === 'ai-batch' && <AIBatchImportModal initialConfig={batchConfig} userId={user?.uid} groupId={currentGroupId} categories={categories} existingTransactions={transactions} accounts={accounts} creditCards={creditCards} existingBankLogs={bankLogs} existingCardLogs={cardLogs} people={people} onClose={() => { setActiveModal(null); setBatchConfig(null); }} />}
          {activeModal === 'manage-recurring' && <ManageRecurringModal rules={recurringRules} onClose={() => setActiveModal(null)} onAdd={() => setActiveModal('add-recurring')} onEdit={(r: any) => { setSelectedItem(r); setActiveModal('add-recurring') }} onDelete={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'recurring'), id)), '確定刪除此固定收支規則?')} />}

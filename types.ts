@@ -91,6 +91,7 @@ export interface Category {
   name: string;
   type: 'expense' | 'income';
   budgetLimit?: number; // Added for Budgeting feature
+  order?: number; // Added for Category Reordering
 }
 
 export interface RecurringRule {
