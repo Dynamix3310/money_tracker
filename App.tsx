@@ -18,7 +18,9 @@ import { AuthScreen } from './components/Auth';
 import { NetWorthAreaChart, CashFlowBarChart } from './components/Charts';
 import { 
   SettingsModal, AddTransactionModal, PortfolioRebalanceModal, AddRecurringModal, AIBatchImportModal,
-  // Assuming these are all in Modals.tsx or I will add them there
+  AddPlatformModal, ManagePlatformCashModal, AddAssetModal, SellAssetModal, EditAssetPriceModal,
+  AddDividendModal, AddAccountModal, AddCardModal, EditAssetModal, TransferModal,
+  BankDetailModal, CardDetailModal, AIAssistantModal
 } from './components/Modals';
 import { PortfolioView, LedgerView, CashView, NavBtn } from './components/Views';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
@@ -42,11 +44,6 @@ const safeDate = (timestamp: any) => {
 const convert = (amount: number, from: string, to: string, rates: Record<string, number>) => {
     if (from === to) return amount;
     if (!rates || !rates[from]) return amount;
-    // Assuming rates are relative to baseCurrency (value 1) or USD.
-    // Ideally: (amount / rates[from]) * rates[to]
-    // But typical free APIs return rates with base = 1.
-    // If we assume the 'rates' object passed is relative to 'baseCurrency', then:
-    // To convert FROM 'from' TO 'baseCurrency': amount / rates[from]
     return amount / rates[from];
 };
 
@@ -56,13 +53,11 @@ const getMonthlyCashFlow = (transactions: Transaction[], baseCurrency: string, r
     for(let i=5; i>=0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const label = `${d.getMonth()+1}月`;
-        
         const monthlyTrans = transactions.filter(t => {
             if(!t.date) return false;
             const td = new Date(t.date.seconds * 1000);
             return td.getFullYear() === d.getFullYear() && td.getMonth() === d.getMonth();
         });
-
         const income = monthlyTrans.filter(t => t.type === 'income').reduce((acc, t) => acc + t.totalAmount, 0);
         const expense = monthlyTrans.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.totalAmount, 0);
         result.push({ label, income, expense });
@@ -104,51 +99,31 @@ export default function App() {
    
    const holdingsRef = useRef<AssetHolding[]>([]);
 
-   useEffect(() => {
-       holdingsRef.current = holdings;
-   }, [holdings]);
+   useEffect(() => { holdingsRef.current = holdings; }, [holdings]);
 
    useEffect(() => {
-      const unsub = onAuthStateChanged(auth, (u) => {
-         setUser(u);
-         setLoading(false);
-      });
+      const unsub = onAuthStateChanged(auth, (u) => { setUser(u); setLoading(false); });
       return () => unsub();
    }, []);
 
-   // Listen to User Profile and Groups
    useEffect(() => {
       if (!user || !db) return;
       const unsubProfile = onSnapshot(doc(db, getUserProfilePath(user.uid)), (docSnap) => {
          if (docSnap.exists()) {
             const data = docSnap.data();
-            if (data.currentGroupId) {
-               setCurrentGroupId(data.currentGroupId);
-            }
-         } else {
-            setCurrentGroupId(user.uid);
-         }
+            if (data.currentGroupId) setCurrentGroupId(data.currentGroupId);
+         } else { setCurrentGroupId(user.uid); }
       });
-
-      const groupsQuery = query(
-          collection(db, 'artifacts/wealthflow-stable-restore/groups'), 
-          where('members', 'array-contains', user.uid)
-      );
-      
+      const groupsQuery = query(collection(db, 'artifacts/wealthflow-stable-restore/groups'), where('members', 'array-contains', user.uid));
       const unsubGroups = onSnapshot(groupsQuery, (snap) => {
           const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Group[];
           setUserGroups(list);
       });
-
       return () => { unsubProfile(); unsubGroups(); };
    }, [user]);
 
-   // Auto Fetch Rates
-   useEffect(() => {
-      fetchExchangeRates(baseCurrency).then(r => { if (r) setRates(r); });
-   }, [baseCurrency]);
+   useEffect(() => { fetchExchangeRates(baseCurrency).then(r => { if (r) setRates(r); }); }, [baseCurrency]);
 
-   // Auto Refresh Stock Prices (Every 15 mins)
    useEffect(() => {
       if (!user) return;
       const interval = setInterval(() => { updateAssetPrices(false); }, 15 * 60 * 1000);
@@ -156,7 +131,6 @@ export default function App() {
       return () => { clearInterval(interval); clearTimeout(initialTimer); };
    }, [user]);
 
-   // Check Recurring Rules (Hourly)
    useEffect(() => {
       if (!user || recurringRules.length === 0) return;
       const interval = setInterval(() => { checkRecurringRules(); }, 60 * 60 * 1000); 
@@ -190,34 +164,24 @@ export default function App() {
                         const dividendPerShare = rule.amount;
                         const totalDividendAmount = heldShares * dividendPerShare;
                         transactionAmount = totalDividendAmount;
-
                         let price = h.manualPrice;
                         if (!price) {
                             if (h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
                             else price = await fetchStockPrice(h.symbol, apiKey);
                         }
                         if (!price || price <= 0) price = h.currentPrice;
-                        
                         if (price && price > 0) {
                             const newShares = totalDividendAmount / price;
                             const oldTotalCost = h.quantity * h.avgCost;
                             const newTotalCost = oldTotalCost + totalDividendAmount;
                             const newQty = h.quantity + newShares;
                             const newAvgCost = newTotalCost / newQty;
-                            
-                            await updateDoc(holdingRef, {
-                                quantity: newQty,
-                                avgCost: newAvgCost,
-                                currentPrice: price
-                            });
+                            await updateDoc(holdingRef, { quantity: newQty, avgCost: newAvgCost, currentPrice: price });
                             transDesc = `股息自動再投入 (DRIP): ${h.symbol} (DPS:${dividendPerShare}, 總額:${totalDividendAmount.toFixed(2)} -> 買入${newShares.toFixed(4)}股 @ ${price})`;
-                        } else {
-                            transDesc = `股息再投入異常: ${h.symbol} (無法取得股價)`;
-                        }
+                        } else { transDesc = `股息再投入異常: ${h.symbol} (無法取得股價)`; }
                     }
                 } catch (e) { console.error("DRIP Error", e); }
             }
-
             const newTrans = {
                totalAmount: transactionAmount, description: transDesc, category: rule.category, type: rule.type,
                payers: rule.payers || { [rule.payerId]: transactionAmount },
@@ -225,12 +189,10 @@ export default function App() {
                date: Timestamp.fromDate(new Date()), currency: 'TWD', isRecurring: true
             };
             await addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'transactions')), newTrans);
-
             if (rule.linkedPlatformId && shouldUpdateCash) {
                 const platformRef = doc(db, getCollectionPath(user!.uid, null, 'platforms'), rule.linkedPlatformId);
                 await updateDoc(platformRef, { balance: increment(rule.amount) });
             }
-
             const interval = rule.intervalMonths || 1;
             const nextMonth = new Date(nextDate);
             nextMonth.setMonth(nextMonth.getMonth() + interval);
@@ -239,7 +201,6 @@ export default function App() {
       }
    };
 
-   // Sync Data
    useEffect(() => {
       if (!user || !db) return;
       const privateCols = ['platforms', 'holdings', 'accounts', 'bankLogs', 'creditCards', 'cardLogs', 'history'];
@@ -253,7 +214,6 @@ export default function App() {
          if (c === 'cardLogs') setCardLogs(data as CreditCardLog[]);
          if (c === 'history') setHistoryData(data as NetWorthHistory[]);
       }));
-
       let groupUnsubs: any[] = [];
       if (currentGroupId) {
          const groupId = currentGroupId;
@@ -262,10 +222,7 @@ export default function App() {
             const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
             if (c === 'transactions') setTransactions(data as Transaction[]);
             if (c === 'people') setPeople(data as Person[]);
-            if (c === 'categories') {
-                const cats = data as Category[];
-                setCategories(cats.sort((a,b) => (a.order || 0) - (b.order || 0)));
-            }
+            if (c === 'categories') { const cats = data as Category[]; setCategories(cats.sort((a,b) => (a.order || 0) - (b.order || 0))); }
             if (c === 'recurring') setRecurringRules(data as RecurringRule[]);
          }));
       }
@@ -294,15 +251,11 @@ export default function App() {
       let updated = 0;
       let errors: string[] = [];
       const currentKey = localStorage.getItem('finnhub_key') || '';
-
       for (const h of currentHoldings) {
          let price = null;
          if (h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
          else { price = await fetchStockPrice(h.symbol, currentKey); if (!price) errors.push(h.symbol); }
-         if (price) { 
-             await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price }); 
-             updated++; 
-         }
+         if (price) { await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price }); updated++; }
       }
       if (showFeedback && errors.length > 0) alert(`更新完成，但部分失敗: ${errors.join(', ')}`);
       else if (showFeedback) alert(`成功更新 ${updated} 筆資產價格`);
@@ -310,23 +263,16 @@ export default function App() {
 
    const handleImport = async (data: any) => {
       if (!user || !data) return;
-      try {
-         for (const t of data.transactions || []) await addDoc(collection(db, getCollectionPath(user.uid, currentGroupId, 'transactions')), { ...t, date: t.date?.seconds ? Timestamp.fromDate(new Date(t.date.seconds * 1000)) : serverTimestamp() });
-         alert('匯入成功');
-      } catch (e) { console.error(e); alert('匯入失敗'); }
+      try { for (const t of data.transactions || []) await addDoc(collection(db, getCollectionPath(user.uid, currentGroupId, 'transactions')), { ...t, date: t.date?.seconds ? Timestamp.fromDate(new Date(t.date.seconds * 1000)) : serverTimestamp() }); alert('匯入成功'); } catch (e) { console.error(e); alert('匯入失敗'); }
    };
 
-   const confirmDelete = (action: () => void, msg: string) => {
-      setConfirmData({ title: '確認刪除', message: msg, action: () => { action(); setConfirmData(null); } });
-   };
-
+   const confirmDelete = (action: () => void, msg: string) => { setConfirmData({ title: '確認刪除', message: msg, action: () => { action(); setConfirmData(null); } }); };
    const exportData = () => {
       const data = { meta: { generated: new Date() }, holdings, accounts, transactions, bankLogs, creditCards, people };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url; a.download = `backup.json`; a.click();
    };
-
    const exportCSV = () => {
       if (transactions.length === 0) { alert('無交易資料可匯出'); return; }
       const headers = ['Date', 'Description', 'Category', 'Type', 'Total Amount', 'Currency', 'Note'];
@@ -428,6 +374,22 @@ export default function App() {
          {activeModal === 'manage-recurring' && <AddRecurringModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => setActiveModal(null)} editData={selectedItem} />}
          {activeModal === 'rebalance' && <PortfolioRebalanceModal holdings={holdings} platforms={platforms} rates={rates} baseCurrency={baseCurrency} convert={convert} onClose={() => setActiveModal(null)} />}
          
+         {activeModal === 'add-platform' && <AddPlatformModal userId={user?.uid} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'manage-cash' && <ManagePlatformCashModal userId={user?.uid} platform={selectedItem} onClose={() => { setActiveModal(null); setSelectedItem(null); }} />}
+         {activeModal === 'add-asset' && <AddAssetModal userId={user?.uid} platforms={platforms} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'sell' && <SellAssetModal holding={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null); }} />}
+         {activeModal === 'edit-asset-price' && <EditAssetPriceModal holding={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null); }} onEditInfo={() => setActiveModal('edit-asset-info')} onSell={() => setActiveModal('sell')} />}
+         {activeModal === 'edit-asset-info' && <EditAssetModal holding={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null); }} onDelete={(h:any) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'holdings'), h.id)), '確定刪除?')} />}
+         {activeModal === 'add-dividend' && <AddDividendModal userId={user?.uid} groupId={currentGroupId} platforms={platforms} holdings={holdings} people={people} onClose={() => setActiveModal(null)} />}
+         
+         {activeModal === 'add-account' && <AddAccountModal userId={user?.uid} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'add-card' && <AddCardModal userId={user?.uid} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'transfer' && <TransferModal userId={user?.uid} accounts={accounts} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'view-bank' && <BankDetailModal userId={user?.uid} account={selectedItem} logs={bankLogs.filter(l => l.accountId === selectedItem?.id)} onClose={() => { setActiveModal(null); setSelectedItem(null); }} onImport={() => { setBatchConfig({ target: 'bank', targetId: selectedItem?.id }); setActiveModal('ai-batch'); }} />}
+         {activeModal === 'view-card' && <CardDetailModal userId={user?.uid} card={selectedItem} cardLogs={cardLogs.filter(l => l.cardId === selectedItem?.id)} allCardLogs={cardLogs} transactions={transactions} onClose={() => { setActiveModal(null); setSelectedItem(null); }} />}
+         
+         {showAI && <AIAssistantModal onClose={() => setShowAI(false)} contextData={{ totalNetWorth, holdings, transactions }} />}
+
          {/* Confirm Dialog */}
          {confirmData && (
              <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">

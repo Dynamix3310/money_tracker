@@ -1,3 +1,6 @@
+// Author: Senior Frontend Engineer
+// OS support: Web
+// Description: Type definitions for the application
 
 export interface AssetHolding {
   id: string;
@@ -84,6 +87,7 @@ export interface Person {
   name: string;
   isMe: boolean;
   email?: string; // Added to link auth user to person
+  uid?: string;
 }
 
 export interface Category {
@@ -150,3 +154,5 @@ export interface PortfolioTarget {
   crypto: number;
   cash: number;
 }
+
+// --- End of types.ts ---
