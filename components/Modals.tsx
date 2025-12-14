@@ -1385,7 +1385,8 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
             if (target === 'ledger') {
                 prompt = `Analyze the following data. It is likely accounting records or invoices.
                    Ignore header rows.
-                   Extract and Map to JSON array:
+                   Extract and Map to JSON array.
+                   RETURN ONLY RAW JSON. NO DESCRIPTION. NO MARKDOWN.
                    - description: Seller Name or Item Name
                    - amount: Number (remove currency symbols, handle commas)
                    - date: YYYY-MM-DD (If missing year, use current year ${new Date().getFullYear()})
@@ -1393,13 +1394,36 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                    - category: Choose closest match from [${categories.map((c: any) => c.name).join(', ')}] based on seller/item.
                    `;
             } else if (target === 'bank') {
-                prompt = `Parse the input into a JSON array of bank logs. Fields: date (YYYY-MM-DD), description, amount (number), type (in/out). Note: 'in' is deposit/income, 'out' is withdrawal/expense. Infer type from context if possible. (If missing year, use current year ${new Date().getFullYear()})`;
+                prompt = `Parse the input into a JSON array of bank logs. Fields: date (YYYY-MM-DD), description, amount (number), type (in/out). Note: 'in' is deposit/income, 'out' is withdrawal/expense. Infer type from context if possible. (If missing year, use current year ${new Date().getFullYear()}). RETURN ONLY RAW JSON.`;
             } else if (target === 'card') {
-                prompt = `Parse the input into a JSON array of credit card logs. Fields: date (YYYY-MM-DD), description, amount (number). Note: Amount should be positive number. (If missing year, use current year ${new Date().getFullYear()})`;
+                prompt = `Parse the input into a JSON array of credit card logs. Fields: date (YYYY-MM-DD), description, amount (number). Note: Amount should be positive number. (If missing year, use current year ${new Date().getFullYear()}). RETURN ONLY RAW JSON.`;
             }
 
             const res = await callGemini(prompt, contentToAnalyze);
-            const json = JSON.parse(res.replace(/```json/g, '').replace(/```/g, ''));
+
+            // Check for API Error messages
+            if (res.includes("權限限制") || res.includes("API Key") || res.includes("系統錯誤")) {
+                alert(res);
+                setLoading(false);
+                return;
+            }
+
+            let json: any[] = [];
+            try {
+                // Robust Parsing: Extract JSON Array
+                const jsonMatch = res.match(/\[[\s\S]*\]/);
+                if (jsonMatch) {
+                    json = JSON.parse(jsonMatch[0]);
+                } else {
+                    // Fallback cleanup
+                    json = JSON.parse(res.replace(/```json/g, '').replace(/```/g, ''));
+                }
+            } catch (e) {
+                console.error("JSON Parse Error", e, res);
+                alert('解析失敗：AI 回傳格式無法讀取');
+                setLoading(false);
+                return;
+            }
 
             const items = Array.isArray(json) ? json : [json];
             const now = new Date();
@@ -1429,7 +1453,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
             setParsedItems(processed);
         } catch (e) {
             console.error(e);
-            alert('解析失敗，請重試');
+            alert('系統發生未預期錯誤');
         } finally {
             setLoading(false);
         }
