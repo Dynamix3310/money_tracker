@@ -1402,21 +1402,22 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
             const res = await callGemini(prompt, contentToAnalyze);
 
             // Check for API Error messages
-            if (res.includes("權限限制") || res.includes("API Key") || res.includes("系統錯誤")) {
+            if (res.includes("權限限制") || res.includes("API Key") || res.includes("系統錯誤") || res.includes("AI 暫時無法回應")) {
                 alert(res);
                 setLoading(false);
                 return;
             }
 
-            let json: any[] = [];
+            let json: any = [];
             try {
-                // Robust Parsing: Extract JSON Array
-                const jsonMatch = res.match(/\[[\s\S]*\]/);
+                // Robust Parsing: Extract JSON Array or Object
+                const jsonMatch = res.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
                 if (jsonMatch) {
                     json = JSON.parse(jsonMatch[0]);
                 } else {
                     // Fallback cleanup
-                    json = JSON.parse(res.replace(/```json/g, '').replace(/```/g, ''));
+                    const clean = res.replace(/```json/g, '').replace(/```/g, '').trim();
+                    json = JSON.parse(clean);
                 }
             } catch (e) {
                 console.error("JSON Parse Error", e, res);
