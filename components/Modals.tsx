@@ -1114,8 +1114,44 @@ export const CardDetailModal = ({ userId, card, cardLogs, allCardLogs, transacti
     const currentCycleEnd = new Date(currentCycleStart); currentCycleEnd.setMonth(currentCycleEnd.getMonth() + 1); currentCycleEnd.setDate(currentCycleEnd.getDate() - 1);
     const prevCycle = () => { const d = new Date(viewStart); d.setMonth(d.getMonth() - 1); setViewStart(d.toISOString().split('T')[0]); };
     const nextCycle = () => { const d = new Date(viewStart); d.setMonth(d.getMonth() + 1); setViewStart(d.toISOString().split('T')[0]); };
-    const globalUsedIds = allCardLogs.filter((cl: any) => cl.id !== linkLog?.id && cl.linkedTransactionId).map((cl: any) => cl.linkedTransactionId);
-    const availableTrans = transactions.filter((t: any) => !globalUsedIds.includes(t.id)).slice(0, 30);
+    
+    // Sort and Filter Transactions for Linking
+    const availableTrans = useMemo(() => {
+        if (!linkLog) return [];
+        
+        const logDate = linkLog.date?.seconds ? new Date(linkLog.date.seconds * 1000).toISOString().split('T')[0] : '';
+        const logAmount = linkLog.amount;
+
+        // 1. Filter: Exclude transactions already linked to OTHER logs (but include if we were re-linking - though UI currently doesn't support re-link flow directly without unlinking first)
+        const globalUsedIds = allCardLogs.filter((cl: any) => cl.id !== linkLog.id && cl.linkedTransactionId).map((cl: any) => cl.linkedTransactionId);
+        
+        // Use ALL transactions (no slice limit) that aren't used elsewhere
+        let candidates = transactions.filter((t: any) => !globalUsedIds.includes(t.id));
+
+        // 2. Sort: Priority (Amount/Date Match) > Time (Newest First)
+        return candidates.sort((a: any, b: any) => {
+            const aDate = a.date?.seconds ? new Date(a.date.seconds * 1000).toISOString().split('T')[0] : '';
+            const bDate = b.date?.seconds ? new Date(b.date.seconds * 1000).toISOString().split('T')[0] : '';
+
+            let scoreA = 0;
+            // High Priority: Amount matches (allow tiny float diff)
+            if (Math.abs(a.totalAmount - logAmount) < 0.1) scoreA += 20;
+            // Medium Priority: Date matches exactly
+            if (aDate === logDate) scoreA += 10;
+
+            let scoreB = 0;
+            if (Math.abs(b.totalAmount - logAmount) < 0.1) scoreB += 20;
+            if (bDate === logDate) scoreB += 10;
+
+            if (scoreA !== scoreB) {
+                return scoreB - scoreA; // Highest score first
+            }
+
+            // Fallback: Chronological Descending (Newest first)
+            return (b.date?.seconds || 0) - (a.date?.seconds || 0);
+        });
+    }, [transactions, allCardLogs, linkLog]);
+
     const viewLogs = cardLogs.filter((l: any) => {
         if (!l.date?.seconds) return false;
         const d = new Date(Number(l.date.seconds) * 1000);
@@ -1131,7 +1167,36 @@ export const CardDetailModal = ({ userId, card, cardLogs, allCardLogs, transacti
     const handleEditClick = (log: any) => { setEditingId(log.id); setAmt(log.amount.toString()); setDesc(log.description); setDate(new Date((log.date.seconds as number) * 1000).toISOString().split('T')[0]); setShowAddLog(true); };
     const handleDeleteClick = async (id: string) => { if (window.confirm('確定要刪除此筆刷卡紀錄嗎？(需二次確認)')) { await deleteDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), id)); if (editingId === id) { setShowAddLog(false); setEditingId(null); } } };
     const linkTrans = async (transId: string) => { if (!linkLog) return; await updateDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), linkLog.id), { isReconciled: true, linkedTransactionId: transId }); setLinkLog(null); }
-    return (<div className={styles.overlay}> {linkLog ? (<div className={styles.content}> <div className="flex justify-between items-center mb-4"><h3 className="font-bold">連結記帳資料</h3><button onClick={() => setLinkLog(null)}><X /></button></div> <div className="space-y-2 max-h-80 overflow-y-auto"> {availableTrans.map((t: any) => (<div key={t.id} onClick={() => linkTrans(t.id)} className="bg-white p-3 border rounded-xl hover:border-indigo-500 cursor-pointer flex justify-between"> <div> <div className="font-bold text-sm">{t.description}</div> <div className="text-xs text-slate-400 font-bold text-indigo-500">{t.date?.seconds ? new Date(t.date.seconds * 1000).toLocaleDateString() : ''}</div> </div> <div className="font-bold">${t.totalAmount}</div> </div>))} </div> </div>) : (<div className={`${styles.content} h-[85vh]`}> <div className="flex justify-between items-center mb-4"> <div><h3 className="font-bold text-xl">{card.name}</h3><div className="text-xs text-slate-500">結帳日: 每月 {card.billingDay} 號</div></div> <button onClick={onClose}><X /></button> </div> <div className="flex items-center justify-between bg-slate-100 p-2 rounded-xl mb-4"> <button onClick={prevCycle} className="p-1 hover:bg-white rounded">◀</button> <div className="text-xs font-bold text-slate-600">{currentCycleStart.toLocaleDateString()} ~ {currentCycleEnd.toLocaleDateString()}</div> <button onClick={nextCycle} className="p-1 hover:bg-white rounded">▶</button> </div> <button onClick={() => { setShowAddLog(!showAddLog); setEditingId(null); setAmt(''); setDesc(''); }} className="w-full py-2 mb-4 border-2 border-dashed border-indigo-200 text-indigo-600 rounded-xl font-bold text-sm">{showAddLog && !editingId ? '隱藏新增' : '+ 新增刷卡紀錄'}</button> {showAddLog && (<div className="bg-slate-50 p-4 rounded-xl border mb-4 space-y-2 animate-in slide-in-from-bottom-4"> <div className="text-xs font-bold text-indigo-500 mb-1">{editingId ? '編輯紀錄' : '新增紀錄'}</div> <div className="flex gap-2"> <div className="flex-1"><label className={styles.label}>日期</label><input type="date" className="w-full p-2 rounded border text-sm" value={date} onChange={e => setDate(e.target.value)} /></div> <div className="flex-1"><label className={styles.label}>金額</label><input type="number" className="w-full p-2 rounded border text-sm" value={amt} onChange={e => setAmt(e.target.value)} /></div> </div> <div><label className={styles.label}>說明</label><div className="flex gap-2"><input className="flex-1 p-2 rounded border text-sm" value={desc} onChange={e => setDesc(e.target.value)} /><button onClick={handleSaveLog} className="bg-indigo-600 text-white px-4 rounded text-xs font-bold">{editingId ? '更新' : '存'}</button></div></div> </div>)} <div className="space-y-2 max-h-[50vh] overflow-y-auto"> {viewLogs.length === 0 && <div className="text-center text-slate-400 py-4">此週期無紀錄</div>} {viewLogs.map((log: any) => { const linkedT = transactions.find((t: any) => t.id === log.linkedTransactionId); return (<div key={log.id} className={`p-3 rounded-xl border ${log.isReconciled ? 'bg-emerald-50/50 border-emerald-100' : 'bg-white border-slate-200'}`}> <div className="flex justify-between items-center mb-1"> <div className="flex items-center gap-2"> <button onClick={async () => { await updateDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), log.id), { isReconciled: !log.isReconciled }) }}>{log.isReconciled ? <CheckCircle size={18} className="text-emerald-500" /> : <Circle size={18} className="text-slate-300" />}</button> <span className={`text-sm font-bold ${log.isReconciled ? 'text-slate-400 line-through' : ''}`}>{log.description}</span> </div> <div className="font-bold font-mono">${log.amount}</div> </div> <div className="flex justify-between items-center pl-7"> <div className="text-[10px] text-slate-400">{new Date((log.date.seconds as number) * 1000).toLocaleDateString()}</div> <div className="flex items-center gap-2"> {!log.isReconciled && <button onClick={() => setLinkLog(log)} className="text-[10px] flex gap-1 bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold"><LinkIcon size={10} /> 連結</button>} {log.isReconciled && linkedT && <span className="text-[10px] text-emerald-600 flex gap-1 bg-emerald-50 px-2 py-1 rounded"><Link2 size={10} /> {linkedT.description}</span>} <button onClick={() => handleEditClick(log)} className="text-slate-400 hover:text-indigo-600"><Edit size={12} /></button> <button onClick={() => handleDeleteClick(log.id)} className="text-slate-400 hover:text-red-600"><Trash2 size={12} /></button> </div> </div> </div>) })} </div> </div>)} </div>)
+    
+    return (<div className={styles.overlay}> {linkLog ? (<div className={styles.content}> 
+        <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">連結記帳資料 (對帳)</h3><button onClick={() => setLinkLog(null)}><X /></button></div> 
+        <div className="bg-slate-50 p-3 rounded-xl mb-4 border border-indigo-100">
+            <div className="text-xs text-slate-500 mb-1">正在為此筆刷卡紀錄尋找對應記帳：</div>
+            <div className="font-bold text-indigo-700 flex justify-between">
+                <span>{linkLog.description}</span>
+                <span>${linkLog.amount}</span>
+            </div>
+            <div className="text-xs text-slate-400 text-right">{new Date((linkLog.date.seconds as number)*1000).toLocaleDateString()}</div>
+        </div>
+        <div className="space-y-2 max-h-80 overflow-y-auto"> 
+            {availableTrans.length === 0 && <div className="text-center py-8 text-slate-400 text-sm">無可連結的記帳資料</div>}
+            {availableTrans.map((t: any) => {
+                const isAmountMatch = Math.abs(t.totalAmount - linkLog.amount) < 0.1;
+                return (
+                    <div key={t.id} onClick={() => linkTrans(t.id)} className={`p-3 border rounded-xl cursor-pointer flex justify-between items-center transition-all ${isAmountMatch ? 'bg-emerald-50/50 border-emerald-200 hover:border-emerald-400' : 'bg-white border-slate-100 hover:border-indigo-400'}`}> 
+                        <div> 
+                            <div className="font-bold text-sm flex items-center gap-2">
+                                {t.description} 
+                                {isAmountMatch && <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded-full">金額相符</span>}
+                            </div> 
+                            <div className="text-xs text-slate-400 font-bold">{t.date?.seconds ? new Date(t.date.seconds * 1000).toLocaleDateString() : ''}</div> 
+                        </div> 
+                        <div className={`font-bold ${isAmountMatch ? 'text-emerald-600' : 'text-slate-700'}`}>${t.totalAmount}</div> 
+                    </div>
+                )
+            })} 
+        </div> 
+    </div>) : (<div className={`${styles.content} h-[85vh]`}> <div className="flex justify-between items-center mb-4"> <div><h3 className="font-bold text-xl">{card.name}</h3><div className="text-xs text-slate-500">結帳日: 每月 {card.billingDay} 號</div></div> <button onClick={onClose}><X /></button> </div> <div className="flex items-center justify-between bg-slate-100 p-2 rounded-xl mb-4"> <button onClick={prevCycle} className="p-1 hover:bg-white rounded">◀</button> <div className="text-xs font-bold text-slate-600">{currentCycleStart.toLocaleDateString()} ~ {currentCycleEnd.toLocaleDateString()}</div> <button onClick={nextCycle} className="p-1 hover:bg-white rounded">▶</button> </div> <button onClick={() => { setShowAddLog(!showAddLog); setEditingId(null); setAmt(''); setDesc(''); }} className="w-full py-2 mb-4 border-2 border-dashed border-indigo-200 text-indigo-600 rounded-xl font-bold text-sm">{showAddLog && !editingId ? '隱藏新增' : '+ 新增刷卡紀錄'}</button> {showAddLog && (<div className="bg-slate-50 p-4 rounded-xl border mb-4 space-y-2 animate-in slide-in-from-bottom-4"> <div className="text-xs font-bold text-indigo-500 mb-1">{editingId ? '編輯紀錄' : '新增紀錄'}</div> <div className="flex gap-2"> <div className="flex-1"><label className={styles.label}>日期</label><input type="date" className="w-full p-2 rounded border text-sm" value={date} onChange={e => setDate(e.target.value)} /></div> <div className="flex-1"><label className={styles.label}>金額</label><input type="number" className="w-full p-2 rounded border text-sm" value={amt} onChange={e => setAmt(e.target.value)} /></div> </div> <div><label className={styles.label}>說明</label><div className="flex gap-2"><input className="flex-1 p-2 rounded border text-sm" value={desc} onChange={e => setDesc(e.target.value)} /><button onClick={handleSaveLog} className="bg-indigo-600 text-white px-4 rounded text-xs font-bold">{editingId ? '更新' : '存'}</button></div></div> </div>)} <div className="space-y-2 max-h-[50vh] overflow-y-auto"> {viewLogs.length === 0 && <div className="text-center text-slate-400 py-4">此週期無紀錄</div>} {viewLogs.map((log: any) => { const linkedT = transactions.find((t: any) => t.id === log.linkedTransactionId); return (<div key={log.id} className={`p-3 rounded-xl border ${log.isReconciled ? 'bg-emerald-50/50 border-emerald-100' : 'bg-white border-slate-200'}`}> <div className="flex justify-between items-center mb-1"> <div className="flex items-center gap-2"> <button onClick={async () => { await updateDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), log.id), { isReconciled: !log.isReconciled }) }}>{log.isReconciled ? <CheckCircle size={18} className="text-emerald-500" /> : <Circle size={18} className="text-slate-300" />}</button> <span className={`text-sm font-bold ${log.isReconciled ? 'text-slate-400 line-through' : ''}`}>{log.description}</span> </div> <div className="font-bold font-mono">${log.amount}</div> </div> <div className="flex justify-between items-center pl-7"> <div className="text-[10px] text-slate-400">{new Date((log.date.seconds as number) * 1000).toLocaleDateString()}</div> <div className="flex items-center gap-2"> {!log.isReconciled && <button onClick={() => setLinkLog(log)} className="text-[10px] flex gap-1 bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold"><LinkIcon size={10} /> 連結</button>} {log.isReconciled && linkedT && <span className="text-[10px] text-emerald-600 flex gap-1 bg-emerald-50 px-2 py-1 rounded"><Link2 size={10} /> {linkedT.description}</span>} <button onClick={() => handleEditClick(log)} className="text-slate-400 hover:text-indigo-600"><Edit size={12} /></button> <button onClick={() => handleDeleteClick(log.id)} className="text-slate-400 hover:text-red-600"><Trash2 size={12} /></button> </div> </div> </div>) })} </div> </div>)} </div>)
 }
 
 export const AIAssistantModal = ({ onClose, contextData }: any) => {
