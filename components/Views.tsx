@@ -50,11 +50,6 @@ export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlat
     );
 };
 
-// Sort categories by order if available
-const sortedCategories = useMemo(() => {
-    return [...categories].sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
-}, [categories]);
-
 // --- Ledger View ---
 export const LedgerView = ({ transactions, categories: rawCategories, people, onAdd, onBatchAdd, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring }: any) => {
     const categories = useMemo(() => [...rawCategories].sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [rawCategories]);
