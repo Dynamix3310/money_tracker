@@ -1,4 +1,3 @@
-
 // Author: Senior Frontend Engineer
 // OS support: Web
 // Description: Main Application Component
@@ -19,9 +18,7 @@ import { AuthScreen } from './components/Auth';
 import { NetWorthAreaChart, CashFlowBarChart } from './components/Charts';
 import { 
   SettingsModal, AddTransactionModal, PortfolioRebalanceModal, AddRecurringModal, AIBatchImportModal,
-  ManageRecurringModal, ManageListModal, AddPlatformModal, ManagePlatformCashModal, AddAssetModal,
-  SellAssetModal, EditAssetPriceModal, EditAssetModal, AddDividendModal, AddAccountModal, AddCardModal,
-  TransferModal, BankDetailModal, CardDetailModal, AIAssistantModal
+  // Assuming these are all in Modals.tsx or I will add them there
 } from './components/Modals';
 import { PortfolioView, LedgerView, CashView, NavBtn } from './components/Views';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
@@ -428,34 +425,9 @@ export default function App() {
          {activeModal === 'settings' && <SettingsModal onClose={() => setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} onGroupCreate={handleCreateGroup} onGroupSwitch={handleSwitchGroup} currentGroupId={currentGroupId} groups={userGroups} user={user} categories={categories} onAddCategory={(name: string, type: string, budget: number, order: number) => addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'categories')), { name, type, budgetLimit: budget || 0, order: order || 0 })} onUpdateCategory={(id: string, data: any) => updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id), data)} onDeleteCategory={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id)), '確定刪除此分類? (需二次確認)')} />}
          {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal(null); setSelectedItem(null) }} editData={selectedItem} rates={rates} convert={convert} />}
          {activeModal === 'ai-batch' && <AIBatchImportModal initialConfig={batchConfig} userId={user?.uid} groupId={currentGroupId} categories={categories} existingTransactions={transactions} accounts={accounts} creditCards={creditCards} existingBankLogs={bankLogs} existingCardLogs={cardLogs} people={people} onClose={() => { setActiveModal(null); setBatchConfig(null); }} />}
-         
-         {activeModal === 'manage-recurring' && <ManageRecurringModal rules={recurringRules} onClose={() => setActiveModal(null)} onAdd={() => setActiveModal('add-recurring')} onEdit={(r: any) => { setSelectedItem(r); setActiveModal('edit-recurring'); }} onDelete={(id: string) => confirmDelete(async () => await updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'recurring'), id), { active: false }), '停用此規則?')} />}
-         {(activeModal === 'add-recurring' || activeModal === 'edit-recurring') && <AddRecurringModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal('manage-recurring'); setSelectedItem(null); }} editData={selectedItem} />}
-         
+         {activeModal === 'manage-recurring' && <AddRecurringModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => setActiveModal(null)} editData={selectedItem} />}
          {activeModal === 'rebalance' && <PortfolioRebalanceModal holdings={holdings} platforms={platforms} rates={rates} baseCurrency={baseCurrency} convert={convert} onClose={() => setActiveModal(null)} />}
          
-         {activeModal === 'add-platform' && <AddPlatformModal userId={user?.uid} onClose={() => setActiveModal(null)} />}
-         {activeModal === 'manage-platforms' && <ManageListModal title="管理平台" items={platforms} renderItem={(p: any) => <div className="font-bold">{p.name} ({p.currency}) <span className="text-xs font-normal text-slate-400">{p.type}</span></div>} onClose={() => setActiveModal(null)} onEdit={(p: any) => { setSelectedItem(p); setActiveModal('add-platform'); }} onDelete={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'platforms'), id)), '刪除平台與關聯資產?')} />}
-         
-         {activeModal === 'manage-cash' && <ManagePlatformCashModal userId={user?.uid} platform={selectedItem} onClose={() => { setActiveModal(null); setSelectedItem(null); }} />}
-         {activeModal === 'add-asset' && <AddAssetModal userId={user?.uid} platforms={platforms} onClose={() => setActiveModal(null)} />}
-         {activeModal === 'sell' && <SellAssetModal holding={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null); }} />}
-         {activeModal === 'edit-asset-price' && <EditAssetPriceModal holding={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null); }} onEditInfo={() => setActiveModal('edit-asset-info')} onSell={() => setActiveModal('sell')} />}
-         {activeModal === 'edit-asset-info' && <EditAssetModal holding={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null); }} onDelete={(h:any) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'holdings'), h.id)), '確定刪除?')} />}
-         {activeModal === 'add-dividend' && <AddDividendModal userId={user?.uid} groupId={currentGroupId} platforms={platforms} holdings={holdings} people={people} onClose={() => setActiveModal(null)} />}
-         
-         {activeModal === 'add-account' && <AddAccountModal userId={user?.uid} onClose={() => setActiveModal(null)} />}
-         {activeModal === 'manage-accounts' && <ManageListModal title="管理銀行帳戶" items={accounts} renderItem={(a: any) => <div className="font-bold">{a.name} ({a.currency})</div>} onClose={() => setActiveModal(null)} onEdit={(a: any) => { setSelectedItem(a); setActiveModal('add-account'); }} onDelete={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'accounts'), id)), '刪除帳戶?')} />}
-         
-         {activeModal === 'add-card' && <AddCardModal userId={user?.uid} onClose={() => setActiveModal(null)} />}
-         {activeModal === 'manage-cards' && <ManageListModal title="管理信用卡" items={creditCards} renderItem={(c: any) => <div className="font-bold">{c.name} <span className="text-xs font-normal text-slate-400">結帳日: {c.billingDay}</span></div>} onClose={() => setActiveModal(null)} onEdit={(c: any) => { setSelectedItem(c); setActiveModal('add-card'); }} onDelete={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'creditCards'), id)), '刪除卡片?')} />}
-         
-         {activeModal === 'transfer' && <TransferModal userId={user?.uid} accounts={accounts} onClose={() => setActiveModal(null)} />}
-         {activeModal === 'view-bank' && <BankDetailModal userId={user?.uid} account={selectedItem} logs={bankLogs.filter(l => l.accountId === selectedItem?.id)} onClose={() => { setActiveModal(null); setSelectedItem(null); }} onImport={() => { setBatchConfig({ target: 'bank', targetId: selectedItem?.id }); setActiveModal('ai-batch'); }} />}
-         {activeModal === 'view-card' && <CardDetailModal userId={user?.uid} card={selectedItem} cardLogs={cardLogs.filter(l => l.cardId === selectedItem?.id)} allCardLogs={cardLogs} transactions={transactions} onClose={() => { setActiveModal(null); setSelectedItem(null); }} />}
-         
-         {showAI && <AIAssistantModal onClose={() => setShowAI(false)} contextData={{ totalNetWorth, holdings, transactions }} />}
-
          {/* Confirm Dialog */}
          {confirmData && (
              <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">

@@ -1,12 +1,13 @@
+
 // Author: Senior Frontend Engineer
 // OS support: Web
 // Description: All Modal components for the application
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   X, Check, Plus, Trash2, Wand2, Upload, Download, 
   HelpCircle, AlertCircle, Calendar, DollarSign, Wallet,
-  Send, ArrowRight, TrendingUp, PieChart
+  Send, ArrowRight, TrendingUp, PieChart, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { db, getCollectionPath, getGroupMetaPath } from '../services/firebase';
 import { 
@@ -14,7 +15,7 @@ import {
   serverTimestamp, Timestamp, getDoc, increment 
 } from 'firebase/firestore';
 import { callGemini } from '../services/gemini';
-import { AssetHolding, Platform, BankAccount, CreditCardInfo } from '../types';
+import { AssetHolding, Platform, BankAccount, CreditCardInfo, Category } from '../types';
 
 const styles = {
   label: "block text-xs font-bold text-slate-500 mb-1 uppercase",
@@ -46,8 +47,31 @@ export const SettingsModal = ({
 }: any) => {
     const [joinCode, setJoinCode] = useState('');
     const [newGroupName, setNewGroupName] = useState('');
+    
+    // Category Logic
     const [newCatName, setNewCatName] = useState('');
     const [newCatType, setNewCatType] = useState('expense');
+    const [newCatBudget, setNewCatBudget] = useState('');
+
+    const handleMoveCat = (index: number, direction: 'up' | 'down') => {
+        const sortedCats = [...categories].sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+        const targetIndex = direction === 'up' ? index - 1 : index + 1;
+        if (targetIndex < 0 || targetIndex >= sortedCats.length) return;
+        
+        const catA = sortedCats[index];
+        const catB = sortedCats[targetIndex];
+        
+        // Swap orders
+        const orderA = catA.order ?? index;
+        const orderB = catB.order ?? targetIndex;
+        
+        onUpdateCategory(catA.id, { order: orderB });
+        onUpdateCategory(catB.id, { order: orderA });
+    };
+
+    const handleUpdateBudget = (id: string, val: string) => {
+        onUpdateCategory(id, { budgetLimit: parseFloat(val) || 0 });
+    };
     
     return (
         <ModalWrapper title="設定" onClose={onClose}>
@@ -86,15 +110,32 @@ export const SettingsModal = ({
                 </div>
 
                 <div>
-                    <h4 className="font-bold text-slate-700 mb-2">分類管理</h4>
-                    <div className="max-h-48 overflow-y-auto space-y-2 border rounded-xl p-2 mb-2">
-                        {categories.map((c: any) => (
+                    <h4 className="font-bold text-slate-700 mb-2">分類管理 (可排序與預算)</h4>
+                    <div className="max-h-60 overflow-y-auto space-y-2 border rounded-xl p-2 mb-2">
+                        {categories.sort((a:any,b:any)=>(a.order||0)-(b.order||0)).map((c: any, idx: number) => (
                              <div key={c.id} className="flex justify-between items-center text-sm p-2 bg-slate-50 rounded-lg group">
-                                 <span>{c.name} <span className="text-xs text-slate-400">({c.type === 'expense' ? '支出' : '收入'})</span></span>
-                                 <div className="flex gap-2">
-                                     {c.order !== undefined && <span className="text-xs text-slate-300">#{c.order}</span>}
-                                     <button onClick={() => onDeleteCategory(c.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"><Trash2 size={14}/></button>
+                                 <div className="flex items-center gap-2 flex-1">
+                                     <div className="flex flex-col gap-0.5">
+                                         <button onClick={() => handleMoveCat(idx, 'up')} className="text-slate-300 hover:text-indigo-600"><ArrowUp size={10}/></button>
+                                         <button onClick={() => handleMoveCat(idx, 'down')} className="text-slate-300 hover:text-indigo-600"><ArrowDown size={10}/></button>
+                                     </div>
+                                     <div className="flex-1">
+                                         <div className="font-bold text-slate-700">{c.name} <span className="text-[10px] text-slate-400 font-normal">({c.type === 'expense' ? '支出' : '收入'})</span></div>
+                                         {c.type === 'expense' && (
+                                             <div className="flex items-center gap-1 mt-1">
+                                                 <span className="text-[10px] text-slate-400">預算:</span>
+                                                 <input 
+                                                     type="number" 
+                                                     className="w-20 px-1 py-0.5 text-xs border rounded bg-white"
+                                                     placeholder="無"
+                                                     value={c.budgetLimit || ''}
+                                                     onChange={(e) => handleUpdateBudget(c.id, e.target.value)}
+                                                 />
+                                             </div>
+                                         )}
+                                     </div>
                                  </div>
+                                 <button onClick={() => onDeleteCategory(c.id)} className="text-slate-300 hover:text-red-500 p-2"><Trash2 size={14}/></button>
                              </div>
                         ))}
                     </div>
@@ -104,7 +145,13 @@ export const SettingsModal = ({
                             <option value="expense">支出</option>
                             <option value="income">收入</option>
                         </select>
-                        <button onClick={() => { if(newCatName) { onAddCategory(newCatName, newCatType); setNewCatName(''); } }} className="px-3 bg-indigo-600 text-white rounded-lg text-sm font-bold"><Plus size={16}/></button>
+                        <button onClick={() => { 
+                            if(newCatName) { 
+                                const maxOrder = categories.reduce((max: number, c: any) => Math.max(max, c.order || 0), 0);
+                                onAddCategory(newCatName, newCatType, 0, maxOrder + 1); 
+                                setNewCatName(''); 
+                            } 
+                        }} className="px-3 bg-indigo-600 text-white rounded-lg text-sm font-bold"><Plus size={16}/></button>
                     </div>
                 </div>
 
@@ -144,9 +191,9 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     const [currency, setCurrency] = useState('TWD');
     const [category, setCategory] = useState('');
     const [description, setDescription] = useState('');
-    const [type, setType] = useState('expense');
+    const [type, setType] = useState(editData?.type || 'expense');
     
-    // Fragment Logic States
+    // Logic States
     const [payerMode, setPayerMode] = useState('single');
     const [mainPayerId, setMainPayerId] = useState(userId);
     const [multiPayers, setMultiPayers] = useState<Record<string, number>>({});
@@ -164,19 +211,22 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
             setType(editData.type);
             setCustomSplits(editData.splitDetails || {});
             setMultiPayers(editData.payers || {});
-            // Infer modes
             if (Object.keys(editData.payers || {}).length > 1) {
                 setPayerMode('multi');
             } else {
                 setPayerMode('single');
                 setMainPayerId(Object.keys(editData.payers || {})[0] || userId);
             }
-            // Infer split mode (simplified)
-            setSplitMode('custom'); 
+            // Detect split mode based on values
+            const values = Object.values(editData.splitDetails || {});
+            const isAllEqual = values.every((v: any) => Math.abs(v - (values[0] as number)) < 0.1);
+            setSplitMode(isAllEqual ? 'equal' : 'custom');
         } else if (categories.length > 0) {
-            setCategory(categories[0].name);
+            // Default category
+            const defaults = categories.filter((c:any) => c.type === type);
+            if (defaults.length > 0) setCategory(defaults[0].name);
         }
-    }, [editData, categories, userId]);
+    }, [editData, categories, userId, type]); // Added type dependency to refresh category
 
     const finalAmt = parseFloat(amount) || 0;
 
@@ -271,22 +321,50 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                     </div>
                 </div>
 
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>{type === 'expense' ? '付款人' : '入帳者 (金流流入)'}</label>{people.length > 1 && (<div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setPayerMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'single' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>單人</button><button onClick={() => setPayerMode('multi')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'multi' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>多人</button></div>)}</div>{payerMode === 'single' ? (<select className={styles.input} value={mainPayerId} onChange={e => setMainPayerId(e.target.value)}>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={multiPayers[p.id] || ''} onChange={e => handlePayerChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, multiPayers, setMultiPayers)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                    <div className="flex justify-between items-center mb-2">
+                        <label className={styles.label}>{type === 'expense' ? '付款人' : '入帳者 (錢進誰口袋)'}</label>
+                        {people.length > 1 && (<div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setPayerMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'single' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>單人</button><button onClick={() => setPayerMode('multi')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'multi' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>多人</button></div>)}
+                    </div>
+                    {payerMode === 'single' ? (
+                        <select className={styles.input} value={mainPayerId} onChange={e => setMainPayerId(e.target.value)}>
+                            {people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                    ) : (
+                        <div className="space-y-2">
+                            {people.map((p: any) => (
+                                <div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={multiPayers[p.id] || ''} onChange={e => handlePayerChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, multiPayers, setMultiPayers)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>
+                            ))}
+                        </div>
+                    )}
+                </div>
                 
                 {people.length > 1 && (
                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                        <div className="flex justify-between items-center mb-2"><label className={styles.label}>{type === 'expense' ? '分帳 (誰消費)' : '歸屬 (誰的收入)'}</label></div>
+                        <div className="flex justify-between items-center mb-2">
+                            <label className={styles.label}>{type === 'expense' ? '分帳 (誰消費)' : '歸屬 (誰賺的)'}</label>
+                        </div>
                         <div className="flex flex-wrap gap-2 mb-3">
                             <button onClick={() => setQuickSplit('equal')} className={`px-3 py-1 text-xs rounded-full border ${splitMode === 'equal' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'}`}>平分</button>
                             {people.map((p:any) => {
-                                const isFull = splitMode === 'custom' && parseFloat(customSplits[p.id] as any) >= finalAmt - 1;
+                                // Check if this person has full amount
+                                const val = parseFloat(customSplits[p.id] as any);
+                                const isFull = splitMode === 'custom' && val >= finalAmt * 0.99;
                                 return (
                                     <button key={p.id} onClick={() => setQuickSplit(p.id)} className={`px-3 py-1 text-xs rounded-full border ${isFull ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'}`}>{p.name}</button>
                                 )
                             })}
                             <button onClick={() => setSplitMode('custom')} className={`px-3 py-1 text-xs rounded-full border ${splitMode === 'custom' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'}`}>自訂</button>
                         </div>
-                        {splitMode === 'equal' ? (<div className="text-center text-xs text-slate-500 py-2">每人約 <span className="font-bold text-indigo-600">${(finalAmt / people.length).toFixed(1)}</span></div>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={customSplits[p.id] || ''} onChange={e => handleSplitChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, customSplits, setCustomSplits)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}
+                        {splitMode === 'equal' ? (
+                            <div className="text-center text-xs text-slate-500 py-2">每人約 <span className="font-bold text-indigo-600">${(finalAmt / people.length).toFixed(1)}</span></div>
+                        ) : (
+                            <div className="space-y-2">
+                                {people.map((p: any) => (
+                                    <div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={customSplits[p.id] || ''} onChange={e => handleSplitChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, customSplits, setCustomSplits)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
                 <div><label className={styles.label}>說明</label><input className={styles.input} value={description} onChange={e => setDescription(e.target.value)} /></div>
@@ -571,7 +649,7 @@ export const EditAssetPriceModal = ({ holding, userId, onClose, onEditInfo, onSe
 );
 
 export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
-    // Simplified
+    // Simplified edit asset modal
     return (
         <ModalWrapper title="編輯持倉" onClose={onClose}>
              <button onClick={() => onDelete(holding)} className="w-full py-3 bg-red-600 text-white rounded-xl font-bold">刪除此持倉</button>
@@ -580,7 +658,7 @@ export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
 };
 
 export const AddDividendModal = ({ userId, onClose }: any) => {
-    // Simple manual add for now, encouraging recurring rules
+    // Encouragement modal
     return (
         <ModalWrapper title="紀錄股息" onClose={onClose}>
             <div className="text-center text-slate-500 py-8">
