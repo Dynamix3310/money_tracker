@@ -33,8 +33,12 @@ export async function callGemini(prompt: string, imageBase64?: string) {
   const isAllowedUser = userEmail && ADMIN_EMAILS.includes(userEmail);
   const userCustomKey = localStorage.getItem('user_gemini_key');
 
-  if (isAllowedUser) {
-    // Use System Env Key for admins
+  // 1. Prioritize User Custom Key (Settings)
+  if (userCustomKey) {
+    apiKey = userCustomKey;
+  }
+  // 2. If no custom key, check if user is allowed to use System Env Key
+  else if (isAllowedUser) {
     if (import.meta.env) {
       if (import.meta.env.VITE_GEMINI_API_KEY) apiKey = import.meta.env.VITE_GEMINI_API_KEY;
       else if (import.meta.env.API_KEY) apiKey = import.meta.env.API_KEY;
@@ -43,9 +47,6 @@ export async function callGemini(prompt: string, imageBase64?: string) {
       if (process.env.VITE_GEMINI_API_KEY) apiKey = process.env.VITE_GEMINI_API_KEY;
       else if (process.env.API_KEY) apiKey = process.env.API_KEY;
     }
-  } else {
-    // Use User Custom Key for others
-    if (userCustomKey) apiKey = userCustomKey;
   }
 
   if (!apiKey) {
