@@ -3,7 +3,7 @@
 // Description: Main View Components for App Tabs
 
 import React from 'react';
-import { Edit, Trash2, Link2, Plus, Repeat } from 'lucide-react';
+import { Edit, Trash2, Link2, Plus, Repeat, Settings2, Wallet } from 'lucide-react';
 import { Transaction, Person, Category, AssetHolding, Platform, BankAccount, CreditCardInfo, CreditCardLog } from '../types';
 
 export const NavBtn = ({ icon, label, active, onClick }: { icon: any, label: string, active: boolean, onClick: () => void }) => (
@@ -16,26 +16,31 @@ export const NavBtn = ({ icon, label, active, onClick }: { icon: any, label: str
 export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlatform, onManageCash, onAddAsset, onUpdatePrices, onEdit, onSell, onDividend, onRebalance, baseCurrency, rates, convert, CURRENCY_SYMBOLS }: any) => {
     return (
         <div className="space-y-4">
-            <div className="flex gap-2 overflow-x-auto pb-2">
-                <button onClick={onUpdatePrices} className="whitespace-nowrap bg-white text-slate-700 px-4 py-2 rounded-xl shadow-sm border border-slate-100 font-bold text-sm flex items-center gap-2">更新報價</button>
-                <button onClick={onRebalance} className="whitespace-nowrap bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl shadow-sm border border-indigo-100 font-bold text-sm flex items-center gap-2">再平衡</button>
-                <button onClick={onAddAsset} className="whitespace-nowrap bg-indigo-600 text-white px-4 py-2 rounded-xl shadow font-bold text-sm flex items-center gap-2"><Plus size={16}/> 新增資產</button>
+            <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                <button onClick={onUpdatePrices} className="whitespace-nowrap bg-white text-slate-700 px-3 py-2 rounded-xl shadow-sm border border-slate-100 font-bold text-xs flex items-center gap-1">更新報價</button>
+                <button onClick={onRebalance} className="whitespace-nowrap bg-indigo-50 text-indigo-600 px-3 py-2 rounded-xl shadow-sm border border-indigo-100 font-bold text-xs flex items-center gap-1">再平衡</button>
+                <button onClick={onAddAsset} className="whitespace-nowrap bg-indigo-600 text-white px-3 py-2 rounded-xl shadow font-bold text-xs flex items-center gap-1"><Plus size={14}/> 新增資產</button>
+                <button onClick={onAddPlatform} className="whitespace-nowrap bg-white text-slate-700 px-3 py-2 rounded-xl shadow-sm border border-slate-100 font-bold text-xs flex items-center gap-1"><Plus size={14}/> 平台</button>
+                <button onClick={onManagePlatform} className="whitespace-nowrap bg-white text-slate-700 px-3 py-2 rounded-xl shadow-sm border border-slate-100 font-bold text-xs flex items-center gap-1"><Settings2 size={14}/> 管理平台</button>
             </div>
             {holdings.length === 0 && platforms.length === 0 ? (
                 <div className="text-center py-10 text-slate-400">尚無投資資料</div>
             ) : (
                 <div className="space-y-3">
                     {platforms.map((p: Platform) => (
-                         <div key={p.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                         <div key={p.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100" onClick={() => onManageCash(p)}>
                              <div className="flex justify-between items-center mb-2">
                                  <h3 className="font-bold text-slate-700">{p.name}</h3>
                                  <span className="text-sm font-mono">{CURRENCY_SYMBOLS[p.currency]}{p.balance.toLocaleString()}</span>
                              </div>
-                             <div className="text-xs text-slate-400">可用現金</div>
+                             <div className="text-xs text-slate-400 flex justify-between">
+                                 <span>{p.type === 'stock' ? '證券帳戶' : '加密錢包'}</span>
+                                 <span className="text-indigo-500 font-bold">管理資金 &gt;</span>
+                             </div>
                          </div>
                     ))}
                     {holdings.map((h: AssetHolding) => (
-                        <div key={h.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center" onClick={() => onEdit(h)}>
+                        <div key={h.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => onEdit(h)}>
                             <div>
                                 <div className="font-bold text-slate-800">{h.symbol}</div>
                                 <div className="text-xs text-slate-500">{h.quantity} 股 • Avg {h.avgCost.toFixed(2)}</div>
@@ -65,12 +70,12 @@ export const LedgerView = ({ transactions, categories, people, cardLogs, onAdd, 
     return (
         <div className="space-y-4">
             <div className="flex gap-2 pb-2">
-                <button onClick={onManageRecurring} className="flex-1 bg-white text-slate-700 px-3 py-2 rounded-xl shadow-sm border border-slate-100 font-bold text-xs flex items-center justify-center gap-2"><Repeat size={14}/> 固定收支</button>
-                <button onClick={onBatchAdd} className="flex-1 bg-indigo-50 text-indigo-600 px-3 py-2 rounded-xl shadow-sm border border-indigo-100 font-bold text-xs flex items-center justify-center gap-2">AI 批量</button>
+                <button onClick={onManageRecurring} className="flex-1 bg-white text-slate-700 px-3 py-2 rounded-xl shadow-sm border border-slate-100 font-bold text-xs flex items-center justify-center gap-2"><Repeat size={14}/> 固定收支管理</button>
+                <button onClick={onBatchAdd} className="flex-1 bg-indigo-50 text-indigo-600 px-3 py-2 rounded-xl shadow-sm border border-indigo-100 font-bold text-xs flex items-center justify-center gap-2">AI 批量記帳</button>
             </div>
             
             <div className="space-y-3">
-                {transactions.sort((a: Transaction, b: Transaction) => b.date?.seconds - a.date?.seconds).map((t: Transaction) => {
+                {transactions.sort((a: Transaction, b: Transaction) => (b.date?.seconds || 0) - (a.date?.seconds || 0)).map((t: Transaction) => {
                     const myShare = t.splitDetails && myPersonId ? (t.splitDetails[myPersonId] || 0) : 0;
                     
                     return (
@@ -116,17 +121,28 @@ export const CashView = ({ accounts, creditCards, onTransfer, onAddAccount, onMa
     return (
         <div className="space-y-4">
             <div className="flex gap-2">
-                 <button onClick={onAddAccount} className="flex-1 bg-white p-3 rounded-xl shadow-sm border text-sm font-bold text-slate-700">新增帳戶</button>
-                 <button onClick={onAddCard} className="flex-1 bg-white p-3 rounded-xl shadow-sm border text-sm font-bold text-slate-700">新增信用卡</button>
+                 <button onClick={onAddAccount} className="flex-1 bg-white p-3 rounded-xl shadow-sm border text-sm font-bold text-slate-700 flex items-center justify-center gap-2"><Plus size={16}/> 帳戶</button>
+                 <button onClick={onAddCard} className="flex-1 bg-white p-3 rounded-xl shadow-sm border text-sm font-bold text-slate-700 flex items-center justify-center gap-2"><Plus size={16}/> 信用卡</button>
+            </div>
+            <div className="flex justify-between items-center px-1">
+                <span className="text-xs font-bold text-slate-400">資產列表</span>
+                <div className="flex gap-2">
+                    <button onClick={onManageAccount} className="text-xs text-indigo-600 font-bold">管理帳戶</button>
+                    <span className="text-slate-300">|</span>
+                    <button onClick={onManageCard} className="text-xs text-indigo-600 font-bold">管理卡片</button>
+                </div>
             </div>
             {accounts.map((a: BankAccount) => (
-                <div key={a.id} onClick={() => onViewAccount(a)} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                    <div className="font-bold text-slate-700">{a.name}</div>
-                    <div className="font-mono text-xl font-bold mt-1 text-slate-800">{a.currency} {(a.currentBalance || 0).toLocaleString()}</div>
+                <div key={a.id} onClick={() => onViewAccount(a)} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center cursor-pointer hover:bg-slate-50">
+                    <div>
+                        <div className="font-bold text-slate-700">{a.name}</div>
+                        <div className="font-mono text-xl font-bold mt-1 text-slate-800">{a.currency} {(a.currentBalance || 0).toLocaleString()}</div>
+                    </div>
+                    <Wallet className="text-slate-200" size={24} />
                 </div>
             ))}
             {creditCards.map((c: CreditCardInfo) => (
-                 <div key={c.id} onClick={() => onViewCard(c)} className="bg-gradient-to-br from-slate-800 to-slate-900 text-white p-4 rounded-xl shadow-lg">
+                 <div key={c.id} onClick={() => onViewCard(c)} className="bg-gradient-to-br from-slate-800 to-slate-900 text-white p-4 rounded-xl shadow-lg cursor-pointer hover:scale-[1.01] transition-transform">
                     <div className="font-bold text-sm opacity-80">{c.name}</div>
                     <div className="mt-4 text-xs text-slate-400">結帳日: 每月 {c.billingDay} 號</div>
                 </div>
