@@ -342,7 +342,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     const [category, setCategory] = useState(editData?.category || '');
     const [date, setDate] = useState(editData?.date?.seconds ? new Date(editData.date.seconds * 1000).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
     const [payerMode, setPayerMode] = useState<'single' | 'multi'>('single');
-    const [splitMode, setSplitMode] = useState<'equal' | 'custom' | 'single'>('equal');
+    const [splitMode, setSplitMode] = useState<'equal' | 'custom' | 'single'>('single');
     const [isRecurring, setIsRecurring] = useState(false);
     const [mainPayerId, setMainPayerId] = useState(editData ? Object.keys(editData.payers)[0] : (people.find((p: any) => p.isMe || p.uid === auth.currentUser?.uid)?.id || people[0]?.id || ''));
     const [singleSplitPayerId, setSingleSplitPayerId] = useState(editData ? Object.keys(editData.splitDetails).find(k => editData.splitDetails[k] > 0) || '' : ''); // Who pays 100% in single split mode
@@ -351,7 +351,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     const [loadingAI, setLoadingAI] = useState(false);
 
     useEffect(() => { if (editData) { if (Object.keys(editData.payers).length > 1) setPayerMode('multi'); const values: number[] = Object.values(editData.splitDetails); if (values.length > 0 && (Math.max(...values) - Math.min(...values) > 1)) setSplitMode('custom'); } }, []);
-    const currentCats = categories.filter((c: any) => c.type === type);
+    const currentCats = useMemo(() => categories.filter((c: any) => c.type === type).sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [categories, type]);
     useEffect(() => { if (currentCats.length > 0 && !category) setCategory(currentCats[0].name); }, [type, categories]);
 
     const rawAmount = parseFloat(amount) || 0;
