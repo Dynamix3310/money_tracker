@@ -1,3 +1,4 @@
+
 // Author: Senior Frontend Engineer
 // OS support: Web
 // Description: Entry point of the React application

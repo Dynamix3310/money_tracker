@@ -9,16 +9,16 @@ export interface AssetHolding {
   quantity: number;
   avgCost: number;
   currentPrice: number;
-  manualPrice?: number; // User overridden price
+  manualPrice?: number;
   currency: string;
   type: 'stock' | 'crypto';
 }
 
 export interface InvestmentLot {
   id: string;
-  date: any; // Timestamp
-  quantity: number; // Original quantity purchased
-  remainingQuantity: number; // Quantity currently held
+  date: any;
+  quantity: number;
+  remainingQuantity: number;
   costPerShare: number;
   currency: string;
   note?: string;
@@ -28,7 +28,7 @@ export interface Platform {
   id: string;
   name: string;
   type: 'stock' | 'crypto';
-  balance: number; // Cash balance on the platform (Buying Power)
+  balance: number;
   currency: string;
 }
 
@@ -63,7 +63,7 @@ export interface CreditCardLog {
   description: string;
   isReconciled: boolean;
   linkedTransactionId?: string;
-  linkedGroupId?: string; // Added for cross-ledger linking
+  linkedGroupId?: string;
 }
 
 export interface Transaction {
@@ -73,10 +73,10 @@ export interface Transaction {
   category: string;
   type: 'expense' | 'income';
   totalAmount: number;
-  currency: string; // The currency of totalAmount (usually Ledger Base)
-  sourceAmount?: number; // Original amount if different currency
-  sourceCurrency?: string; // Original currency
-  exchangeRate?: number; // Rate used for conversion
+  currency: string;
+  sourceAmount?: number;
+  sourceCurrency?: string;
+  exchangeRate?: number;
   payers: Record<string, number>;
   splitDetails: Record<string, number>;
   isRecurring?: boolean;
@@ -86,7 +86,7 @@ export interface Person {
   id: string;
   name: string;
   isMe: boolean;
-  email?: string; // Added to link auth user to person
+  email?: string;
   uid?: string;
 }
 
@@ -94,26 +94,26 @@ export interface Category {
   id: string;
   name: string;
   type: 'expense' | 'income';
-  budgetLimit?: number; // Added for Budgeting feature
-  order?: number; // Added for custom sorting
+  budgetLimit?: number;
+  order?: number;
 }
 
 export interface RecurringRule {
   id: string;
   name: string;
-  amount: number; // For DRIP, this represents Dividend Per Share (DPS). For others, it's total amount.
+  amount: number;
   category: string;
   type: 'expense' | 'income';
   payerId: string;
   nextDate: any;
   frequency: 'monthly' | 'custom';
-  intervalMonths?: number; // 1=Monthly, 3=Quarterly, 12=Annually
-  linkedPlatformId?: string; // If set, adds amount to this platform's balance automatically
+  intervalMonths?: number;
+  linkedPlatformId?: string;
   active: boolean;
   payers?: Record<string, number>;
   splitDetails?: Record<string, number>;
-  linkedHoldingId?: string; // For DRIP: which asset to update
-  isDRIP?: boolean; // If true, calculates shares and updates holding instead of cash
+  linkedHoldingId?: string;
+  isDRIP?: boolean;
 }
 
 export interface NetWorthHistory {
