@@ -5,23 +5,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, Check, Plus, Trash2, Wand2, Upload, Download, 
-  HelpCircle, AlertCircle, Calendar, DollarSign, Wallet 
+  HelpCircle, AlertCircle, Calendar, DollarSign, Wallet,
+  Send, ArrowRight, TrendingUp, PieChart
 } from 'lucide-react';
 import { db, getCollectionPath, getGroupMetaPath } from '../services/firebase';
 import { 
   collection, addDoc, updateDoc, deleteDoc, doc, 
-  serverTimestamp, Timestamp, getDoc 
+  serverTimestamp, Timestamp, getDoc, increment 
 } from 'firebase/firestore';
 import { callGemini } from '../services/gemini';
 import { AssetHolding, Platform, BankAccount, CreditCardInfo } from '../types';
 
-// Styles used in fragments
 const styles = {
   label: "block text-xs font-bold text-slate-500 mb-1 uppercase",
   input: "w-full px-3 py-2 rounded-lg border bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm"
 };
 
-const ModalWrapper = ({ title, onClose, children }: { title: string, onClose: () => void, children: React.ReactNode }) => (
+const ModalWrapper = ({ title, onClose, children }: { title: string, onClose: () => void, children?: React.ReactNode }) => (
   <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto flex flex-col animate-in zoom-in-95 duration-200">
       <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
@@ -67,7 +67,7 @@ export const SettingsModal = ({
 
                 <div>
                     <h4 className="font-bold text-slate-700 mb-2">群組管理</h4>
-                    <div className="flex gap-2 mb-2">
+                    <div className="flex gap-2 mb-2 flex-wrap">
                         {groups.map((g: any) => (
                             <button key={g.id} onClick={() => onGroupSwitch(g.id)} className={`px-3 py-1 text-xs rounded-full border ${currentGroupId === g.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600'}`}>
                                 {g.name}
@@ -91,7 +91,10 @@ export const SettingsModal = ({
                         {categories.map((c: any) => (
                              <div key={c.id} className="flex justify-between items-center text-sm p-2 bg-slate-50 rounded-lg group">
                                  <span>{c.name} <span className="text-xs text-slate-400">({c.type === 'expense' ? '支出' : '收入'})</span></span>
-                                 <button onClick={() => onDeleteCategory(c.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"><Trash2 size={14}/></button>
+                                 <div className="flex gap-2">
+                                     {c.order !== undefined && <span className="text-xs text-slate-300">#{c.order}</span>}
+                                     <button onClick={() => onDeleteCategory(c.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"><Trash2 size={14}/></button>
+                                 </div>
                              </div>
                         ))}
                     </div>
@@ -268,7 +271,6 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                     </div>
                 </div>
 
-                {/* Logic Fragment Start */}
                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>{type === 'expense' ? '付款人' : '入帳者 (金流流入)'}</label>{people.length > 1 && (<div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setPayerMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'single' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>單人</button><button onClick={() => setPayerMode('multi')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'multi' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>多人</button></div>)}</div>{payerMode === 'single' ? (<select className={styles.input} value={mainPayerId} onChange={e => setMainPayerId(e.target.value)}>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={multiPayers[p.id] || ''} onChange={e => handlePayerChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, multiPayers, setMultiPayers)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>
                 
                 {people.length > 1 && (
@@ -288,7 +290,6 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                     </div>
                 )}
                 <div><label className={styles.label}>說明</label><input className={styles.input} value={description} onChange={e => setDescription(e.target.value)} /></div>
-                {/* Logic Fragment End */}
 
                 <button onClick={handleSubmit} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-indigo-700 transition-all">確認儲存</button>
             </div>
@@ -305,10 +306,10 @@ export const AIBatchImportModal = ({ initialConfig, userId, groupId, onClose }: 
         try {
             const prompt = `Parse the following text into a JSON array of transactions. Text: "${text}". Return JSON only. Format: [{date: "YYYY-MM-DD", amount: number, description: string, category: string}]`;
             const res = await callGemini(prompt);
-            // In a real app, parse `res` and insert into DB
-            alert('AI 解析完成 (模擬): \n' + res);
+            // In a real app, you would parse `res` and insert into DB here
+            alert('AI 解析完成 (此為模擬，請實作寫入邏輯): \n' + res);
             onClose();
-        } catch(e) { alert('Failed'); }
+        } catch(e) { alert('分析失敗'); }
         setIsProcessing(false);
     };
 
@@ -343,25 +344,105 @@ export const ManageRecurringModal = ({ rules, onClose, onAdd, onEdit, onDelete }
 );
 
 export const AddRecurringModal = ({ userId, groupId, people, categories, onClose, editData }: any) => {
-    // Simplified implementation
     const [name, setName] = useState(editData?.name || '');
     const [amount, setAmount] = useState(editData?.amount || '');
+    const [type, setType] = useState(editData?.type || 'expense');
+    const [category, setCategory] = useState(editData?.category || categories[0]?.name || '');
+    const [nextDate, setNextDate] = useState(editData?.nextDate ? new Date(editData.nextDate.seconds * 1000).toISOString().split('T')[0] : '');
+    const [payerId, setPayerId] = useState(editData?.payerId || userId);
+
+    const handleSave = async () => {
+        const data = {
+            name, amount: parseFloat(amount), type, category, payerId,
+            nextDate: Timestamp.fromDate(new Date(nextDate)),
+            active: true,
+            frequency: 'monthly',
+            intervalMonths: 1
+        };
+        if (editData) await updateDoc(doc(db, getCollectionPath(userId, groupId, 'recurring'), editData.id), data);
+        else await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), data);
+        onClose();
+    };
+
     return (
         <ModalWrapper title={editData ? "編輯定期規則" : "新增定期規則"} onClose={onClose}>
-            <input className={styles.input} placeholder="名稱" value={name} onChange={e => setName(e.target.value)} />
-            <input className={styles.input} type="number" placeholder="金額" value={amount} onChange={e => setAmount(e.target.value)} />
-            <button onClick={() => { /* save logic */ onClose(); }} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold">儲存</button>
+            <input className={styles.input} placeholder="名稱 (e.g. Netflix, 房租)" value={name} onChange={e => setName(e.target.value)} />
+            <div className="flex gap-2">
+                <input className={styles.input} type="number" placeholder="金額" value={amount} onChange={e => setAmount(e.target.value)} />
+                <select className={styles.input} value={type} onChange={e => setType(e.target.value)}>
+                    <option value="expense">支出</option>
+                    <option value="income">收入</option>
+                </select>
+            </div>
+            <div className="flex gap-2">
+                <select className={styles.input} value={category} onChange={e => setCategory(e.target.value)}>
+                    {categories.filter((c: any) => c.type === type).map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+                <select className={styles.input} value={payerId} onChange={e => setPayerId(e.target.value)}>
+                    {people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+            </div>
+            <label className={styles.label}>下次執行日期</label>
+            <input type="date" className={styles.input} value={nextDate} onChange={e => setNextDate(e.target.value)} />
+            <button onClick={handleSave} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold">儲存</button>
         </ModalWrapper>
     );
 };
 
 // --- Investment Modals ---
 
-export const PortfolioRebalanceModal = ({ onClose }: any) => (
-    <ModalWrapper title="投資組合再平衡" onClose={onClose}>
-        <div className="text-center text-slate-500 py-8">功能開發中...</div>
-    </ModalWrapper>
-);
+export const PortfolioRebalanceModal = ({ holdings, platforms, rates, baseCurrency, convert, onClose }: any) => {
+    const [targetStock, setTargetStock] = useState(60);
+    const [targetCrypto, setTargetCrypto] = useState(20);
+    const [targetCash, setTargetCash] = useState(20);
+
+    const calculateRebalance = () => {
+        const stockVal = holdings.filter((h:any) => h.type === 'stock').reduce((acc:number, h:any) => acc + (h.quantity * (h.currentPrice||0)), 0);
+        const cryptoVal = holdings.filter((h:any) => h.type === 'crypto').reduce((acc:number, h:any) => acc + (h.quantity * (h.currentPrice||0)), 0);
+        const cashVal = platforms.reduce((acc:number, p:any) => acc + p.balance, 0);
+        const total = stockVal + cryptoVal + cashVal;
+        
+        return {
+            stock: { current: stockVal, target: total * (targetStock/100), diff: (total * (targetStock/100)) - stockVal },
+            crypto: { current: cryptoVal, target: total * (targetCrypto/100), diff: (total * (targetCrypto/100)) - cryptoVal },
+            cash: { current: cashVal, target: total * (targetCash/100), diff: (total * (targetCash/100)) - cashVal }
+        };
+    };
+    
+    const analysis = calculateRebalance();
+
+    return (
+        <ModalWrapper title="投資組合再平衡" onClose={onClose}>
+            <div className="flex gap-2 text-center text-xs font-bold text-slate-500 mb-2">
+                <div className="flex-1">股票 %</div><div className="flex-1">加密 %</div><div className="flex-1">現金 %</div>
+            </div>
+            <div className="flex gap-2 mb-4">
+                <input type="number" className={styles.input} value={targetStock} onChange={e => setTargetStock(parseFloat(e.target.value))} />
+                <input type="number" className={styles.input} value={targetCrypto} onChange={e => setTargetCrypto(parseFloat(e.target.value))} />
+                <input type="number" className={styles.input} value={targetCash} onChange={e => setTargetCash(parseFloat(e.target.value))} />
+            </div>
+            
+            <div className="space-y-2 bg-slate-50 p-4 rounded-xl">
+                <div className="flex justify-between text-sm">
+                    <span>股票調整</span>
+                    <span className={analysis.stock.diff > 0 ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
+                        {analysis.stock.diff > 0 ? "買入" : "賣出"} {Math.abs(Math.round(analysis.stock.diff)).toLocaleString()}
+                    </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                    <span>加密貨幣調整</span>
+                    <span className={analysis.crypto.diff > 0 ? "text-green-600 font-bold" : "text-red-600 font-bold"}>
+                        {analysis.crypto.diff > 0 ? "買入" : "賣出"} {Math.abs(Math.round(analysis.crypto.diff)).toLocaleString()}
+                    </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                    <span>現金變動</span>
+                    <span className="font-bold text-slate-700">{Math.round(analysis.cash.diff).toLocaleString()}</span>
+                </div>
+            </div>
+        </ModalWrapper>
+    );
+};
 
 export const AddPlatformModal = ({ userId, onClose }: any) => {
     const [name, setName] = useState('');
@@ -444,11 +525,43 @@ export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
     );
 };
 
-export const SellAssetModal = ({ holding, userId, onClose }: any) => (
-     <ModalWrapper title="賣出資產" onClose={onClose}>
-         <div className="text-center text-slate-500 py-8">功能即將推出</div>
-     </ModalWrapper>
-);
+export const SellAssetModal = ({ holding, userId, onClose }: any) => {
+    const [qty, setQty] = useState('');
+    const [price, setPrice] = useState(holding?.currentPrice || '');
+    
+    const handleSell = async () => {
+        const sellQty = parseFloat(qty);
+        const sellPrice = parseFloat(price);
+        if (sellQty > holding.quantity) return alert('賣出數量超過持有量');
+        
+        // 1. Update Holding
+        const newQty = holding.quantity - sellQty;
+        if (newQty <= 0) {
+            await deleteDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id));
+        } else {
+            await updateDoc(doc(db, getCollectionPath(userId, null, 'holdings'), holding.id), { quantity: newQty });
+        }
+        
+        // 2. Add Cash to Platform
+        const totalVal = sellQty * sellPrice;
+        await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), holding.platformId), {
+            balance: increment(totalVal)
+        });
+        
+        onClose();
+    };
+
+    return (
+        <ModalWrapper title={`賣出 ${holding?.symbol}`} onClose={onClose}>
+            <div className="text-xs text-slate-500 mb-2">持有: {holding?.quantity} | 現價: {holding?.currentPrice}</div>
+            <label className={styles.label}>賣出數量</label>
+            <input className={styles.input} type="number" value={qty} onChange={e => setQty(e.target.value)} />
+            <label className={styles.label}>成交單價</label>
+            <input className={styles.input} type="number" value={price} onChange={e => setPrice(e.target.value)} />
+            <button onClick={handleSell} className="w-full bg-red-500 text-white py-3 rounded-xl font-bold mt-2">確認賣出</button>
+        </ModalWrapper>
+    );
+};
 
 export const EditAssetPriceModal = ({ holding, userId, onClose, onEditInfo, onSell }: any) => (
      <ModalWrapper title={`管理 ${holding?.symbol}`} onClose={onClose}>
@@ -466,11 +579,17 @@ export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
     )
 };
 
-export const AddDividendModal = ({ onClose }: any) => (
-    <ModalWrapper title="紀錄股息" onClose={onClose}>
-        <div className="text-center text-slate-500 py-8">請使用定期規則中的 DRIP 功能</div>
-    </ModalWrapper>
-);
+export const AddDividendModal = ({ userId, onClose }: any) => {
+    // Simple manual add for now, encouraging recurring rules
+    return (
+        <ModalWrapper title="紀錄股息" onClose={onClose}>
+            <div className="text-center text-slate-500 py-8">
+                <p className="mb-4">建議使用「定期收支」功能設定 DRIP (股息再投入) 規則，可自動追蹤。</p>
+                <button onClick={onClose} className="text-indigo-600 font-bold underline">我知道了</button>
+            </div>
+        </ModalWrapper>
+    );
+};
 
 // --- Cash Modals ---
 
@@ -506,11 +625,44 @@ export const AddCardModal = ({ userId, onClose }: any) => {
     );
 };
 
-export const TransferModal = ({ onClose }: any) => (
-    <ModalWrapper title="轉帳" onClose={onClose}>
-        <div className="text-center text-slate-500 py-8">功能開發中</div>
-    </ModalWrapper>
-);
+export const TransferModal = ({ userId, accounts, onClose }: any) => {
+    const [fromId, setFromId] = useState(accounts[0]?.id || '');
+    const [toId, setToId] = useState(accounts[1]?.id || '');
+    const [amount, setAmount] = useState('');
+    const [desc, setDesc] = useState('轉帳');
+
+    const handleTransfer = async () => {
+        if (!fromId || !toId || !amount) return;
+        const amt = parseFloat(amount);
+        // Add OUT record
+        await addDoc(collection(db, getCollectionPath(userId, null, 'bankLogs')), {
+            accountId: fromId, type: 'out', amount: amt, date: serverTimestamp(), description: `轉出至 ${accounts.find((a:any)=>a.id===toId)?.name}: ${desc}`
+        });
+        // Add IN record
+        await addDoc(collection(db, getCollectionPath(userId, null, 'bankLogs')), {
+            accountId: toId, type: 'in', amount: amt, date: serverTimestamp(), description: `來自 ${accounts.find((a:any)=>a.id===fromId)?.name}: ${desc}`
+        });
+        onClose();
+    };
+
+    return (
+        <ModalWrapper title="轉帳" onClose={onClose}>
+            <label className={styles.label}>轉出帳戶</label>
+            <select className={styles.input} value={fromId} onChange={e => setFromId(e.target.value)}>
+                {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+            <label className={styles.label}>轉入帳戶</label>
+            <select className={styles.input} value={toId} onChange={e => setToId(e.target.value)}>
+                {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+            <label className={styles.label}>金額</label>
+            <input className={styles.input} type="number" value={amount} onChange={e => setAmount(e.target.value)} />
+            <label className={styles.label}>備註</label>
+            <input className={styles.input} value={desc} onChange={e => setDesc(e.target.value)} />
+            <button onClick={handleTransfer} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold">確認轉帳</button>
+        </ModalWrapper>
+    );
+};
 
 export const BankDetailModal = ({ account, logs, onClose, onImport }: any) => (
     <ModalWrapper title={account?.name} onClose={onClose}>
@@ -529,16 +681,76 @@ export const BankDetailModal = ({ account, logs, onClose, onImport }: any) => (
     </ModalWrapper>
 );
 
-export const CardDetailModal = ({ card, onClose }: any) => (
+export const CardDetailModal = ({ card, cardLogs, transactions, onClose }: any) => (
     <ModalWrapper title={card?.name} onClose={onClose}>
-        <div className="text-center text-slate-500 py-8">信用卡明細功能開發中</div>
+        <div className="space-y-2 max-h-80 overflow-y-auto">
+            {cardLogs?.length === 0 ? <div className="text-center text-slate-400 py-4">無刷卡紀錄</div> : 
+             cardLogs.map((l: any) => (
+                <div key={l.id} className="p-3 border rounded-xl bg-slate-50 flex justify-between items-center">
+                    <div>
+                        <div className="font-bold text-slate-700">{l.description}</div>
+                        <div className="text-xs text-slate-400">{new Date(l.date.seconds*1000).toLocaleDateString()}</div>
+                    </div>
+                    <div className="font-mono font-bold">${l.amount}</div>
+                </div>
+            ))}
+        </div>
     </ModalWrapper>
 );
 
-export const AIAssistantModal = ({ onClose }: any) => (
-    <ModalWrapper title="AI 助理" onClose={onClose}>
-        <div className="text-center text-slate-500 py-8">我是您的理財助手</div>
-    </ModalWrapper>
-);
+export const AIAssistantModal = ({ contextData, onClose }: any) => {
+    const [msg, setMsg] = useState('');
+    const [history, setHistory] = useState<{role: 'user' | 'model', text: string}[]>([]);
+    const [loading, setLoading] = useState(false);
+    const scrollRef = useRef<HTMLDivElement>(null);
+
+    const handleSend = async () => {
+        if (!msg.trim()) return;
+        const userMsg = msg;
+        setMsg('');
+        setHistory(prev => [...prev, { role: 'user', text: userMsg }]);
+        setLoading(true);
+
+        const prompt = `
+Context Data:
+Net Worth: ${contextData.totalNetWorth}
+Holdings: ${JSON.stringify(contextData.holdings.map((h:any) => ({s:h.symbol, q:h.quantity, v:h.currentPrice})))}
+Recent Transactions: ${JSON.stringify(contextData.transactions.slice(0, 5).map((t:any) => ({d:t.description, a:t.totalAmount})))}
+
+User Question: ${userMsg}
+Answer as a financial assistant in Traditional Chinese. Keep it concise.
+`;
+        try {
+            const res = await callGemini(prompt);
+            setHistory(prev => [...prev, { role: 'model', text: res || 'Error' }]);
+        } catch (e) {
+            setHistory(prev => [...prev, { role: 'model', text: 'Sorry, AI service is currently unavailable.' }]);
+        }
+        setLoading(false);
+    };
+
+    useEffect(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }, [history]);
+
+    return (
+        <ModalWrapper title="AI 財務助理" onClose={onClose}>
+            <div className="h-80 overflow-y-auto space-y-3 p-2 bg-slate-50 rounded-xl" ref={scrollRef}>
+                {history.map((h, i) => (
+                    <div key={i} className={`flex ${h.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${h.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border shadow-sm text-slate-700'}`}>
+                            {h.text}
+                        </div>
+                    </div>
+                ))}
+                {loading && <div className="text-xs text-slate-400 text-center">AI 正在思考...</div>}
+            </div>
+            <div className="flex gap-2">
+                <input className={styles.input} value={msg} onChange={e => setMsg(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSend()} placeholder="詢問您的財務狀況..." />
+                <button onClick={handleSend} className="p-2 bg-indigo-600 text-white rounded-xl"><Send size={20}/></button>
+            </div>
+        </ModalWrapper>
+    );
+};
 
 // --- End of components/Modals.tsx ---
