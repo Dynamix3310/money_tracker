@@ -18,7 +18,9 @@ import { AuthScreen } from './components/Auth';
 import { NetWorthAreaChart, CashFlowBarChart } from './components/Charts';
 import { 
   SettingsModal, AddTransactionModal, PortfolioRebalanceModal, AddRecurringModal, AIBatchImportModal,
-  // Assuming these are all in Modals.tsx or I will add them there
+  AddPlatformModal, ManageListModal, ManagePlatformCashModal, AddAssetModal, SellAssetModal,
+  EditAssetPriceModal, AddDividendModal, AddAccountModal, AddCardModal, TransferModal,
+  BankDetailModal, CardDetailModal, AIAssistantModal
 } from './components/Modals';
 import { PortfolioView, LedgerView, CashView, NavBtn } from './components/Views';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
@@ -43,9 +45,7 @@ const convert = (amount: number, from: string, to: string, rates: Record<string,
     if (from === to) return amount;
     if (!rates || !rates[from]) return amount;
     // Assuming rates are relative to baseCurrency (value 1) or USD.
-    // Ideally: (amount / rates[from]) * rates[to]
-    // But typical free APIs return rates with base = 1.
-    // If we assume the 'rates' object passed is relative to 'baseCurrency', then:
+    // If we assume the 'rates' object passed is relative to 'baseCurrency' (base=1):
     // To convert FROM 'from' TO 'baseCurrency': amount / rates[from]
     return amount / rates[from];
 };
@@ -422,21 +422,44 @@ export default function App() {
                <NavBtn icon={<Wallet size={20} />} label="資金" active={activeTab === 'cash'} onClick={() => setActiveTab('cash')} />
             </div>
          </nav>
+         
+         {/* --- Modals Render Logic --- */}
+         
+         {showAI && <AIAssistantModal contextData={{totalNetWorth, holdings, transactions: transactions.slice(0, 50)}} onClose={() => setShowAI(false)} />}
+         
          {activeModal === 'settings' && <SettingsModal onClose={() => setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} onGroupCreate={handleCreateGroup} onGroupSwitch={handleSwitchGroup} currentGroupId={currentGroupId} groups={userGroups} user={user} categories={categories} onAddCategory={(name: string, type: string, budget: number, order: number) => addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'categories')), { name, type, budgetLimit: budget || 0, order: order || 0 })} onUpdateCategory={(id: string, data: any) => updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id), data)} onDeleteCategory={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id)), '確定刪除此分類? (需二次確認)')} />}
          {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal(null); setSelectedItem(null) }} editData={selectedItem} rates={rates} convert={convert} />}
          {activeModal === 'ai-batch' && <AIBatchImportModal initialConfig={batchConfig} userId={user?.uid} groupId={currentGroupId} categories={categories} existingTransactions={transactions} accounts={accounts} creditCards={creditCards} existingBankLogs={bankLogs} existingCardLogs={cardLogs} people={people} onClose={() => { setActiveModal(null); setBatchConfig(null); }} />}
          {activeModal === 'manage-recurring' && <AddRecurringModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => setActiveModal(null)} editData={selectedItem} />}
          {activeModal === 'rebalance' && <PortfolioRebalanceModal holdings={holdings} platforms={platforms} rates={rates} baseCurrency={baseCurrency} convert={convert} onClose={() => setActiveModal(null)} />}
          
+         {/* Investment Modals */}
+         {activeModal === 'add-platform' && <AddPlatformModal userId={user?.uid} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'manage-platforms' && <ManageListModal title="管理交易平台" items={platforms} renderItem={(p:any) => <div><div className="font-bold">{p.name}</div><div className="text-xs text-slate-400">{p.type} • {p.currency}</div></div>} onClose={() => setActiveModal(null)} onDelete={(id:string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'platforms'), id)), "刪除平台將遺失關聯資金紀錄")} />}
+         {activeModal === 'manage-cash' && <ManagePlatformCashModal userId={user?.uid} platform={selectedItem} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'add-asset' && <AddAssetModal userId={user?.uid} platforms={platforms} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'edit-asset-price' && <EditAssetPriceModal holding={selectedItem} userId={user?.uid} onClose={() => setActiveModal(null)} onEditInfo={() => { /* Simplified edit not implemented in this flow, usually just re-add or delete */ }} onSell={() => setActiveModal('sell')} />}
+         {activeModal === 'sell' && <SellAssetModal holding={selectedItem} userId={user?.uid} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'add-dividend' && <AddDividendModal userId={user?.uid} onClose={() => setActiveModal(null)} />}
+
+         {/* Cash Modals */}
+         {activeModal === 'add-account' && <AddAccountModal userId={user?.uid} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'manage-accounts' && <ManageListModal title="管理銀行帳戶" items={accounts} renderItem={(a:any) => <div><div className="font-bold">{a.name}</div><div className="text-xs text-slate-400">初始: {a.initialBalance}</div></div>} onClose={() => setActiveModal(null)} onDelete={(id:string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'accounts'), id)), "確定刪除帳戶?")} />}
+         {activeModal === 'add-card' && <AddCardModal userId={user?.uid} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'manage-cards' && <ManageListModal title="管理信用卡" items={creditCards} renderItem={(c:any) => <div><div className="font-bold">{c.name}</div><div className="text-xs text-slate-400">結帳日: {c.billingDay}</div></div>} onClose={() => setActiveModal(null)} onDelete={(id:string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'creditCards'), id)), "確定刪除卡片?")} />}
+         {activeModal === 'transfer' && <TransferModal userId={user?.uid} accounts={accounts} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'view-bank' && <BankDetailModal account={selectedItem} logs={bankLogs.filter(l => l.accountId === selectedItem?.id).sort((a,b) => b.date?.seconds - a.date?.seconds)} onClose={() => setActiveModal(null)} onImport={() => alert('銀行明細匯入功能開發中')} />}
+         {activeModal === 'view-card' && <CardDetailModal card={selectedItem} cardLogs={cardLogs.filter(l => l.cardId === selectedItem?.id).sort((a,b) => b.date?.seconds - a.date?.seconds)} transactions={transactions} onClose={() => setActiveModal(null)} />}
+
          {/* Confirm Dialog */}
          {confirmData && (
-             <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
-                 <div className="bg-white p-6 rounded-2xl max-w-sm w-full">
-                     <h3 className="font-bold text-lg mb-2">{confirmData.title}</h3>
-                     <p className="text-slate-500 text-sm mb-4">{confirmData.message}</p>
+             <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                 <div className="bg-white p-6 rounded-2xl max-w-sm w-full animate-in zoom-in-95">
+                     <h3 className="font-bold text-lg mb-2 text-slate-800">{confirmData.title}</h3>
+                     <p className="text-slate-500 text-sm mb-6">{confirmData.message}</p>
                      <div className="flex gap-2 justify-end">
-                         <button onClick={() => setConfirmData(null)} className="px-4 py-2 rounded-lg text-slate-500 font-bold hover:bg-slate-100">取消</button>
-                         <button onClick={confirmData.action} className="px-4 py-2 rounded-lg bg-red-500 text-white font-bold hover:bg-red-600">確認</button>
+                         <button onClick={() => setConfirmData(null)} className="px-4 py-2 rounded-lg text-slate-500 font-bold hover:bg-slate-50 transition-colors">取消</button>
+                         <button onClick={confirmData.action} className="px-4 py-2 rounded-lg bg-red-500 text-white font-bold hover:bg-red-600 transition-colors shadow-lg shadow-red-500/30">確認</button>
                      </div>
                  </div>
              </div>
