@@ -1388,7 +1388,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                    Extract and Map to JSON array.
                    RETURN ONLY RAW JSON. NO DESCRIPTION. NO MARKDOWN.
                    - description: Seller Name or Item Name
-                   - amount: Number (remove currency symbols, handle commas)
+                   - amount: Number (FIND THE TOTAL/FINAL AMOUNT. Remove currency symbols, handle commas)
                    - date: YYYY-MM-DD (If missing year, use current year ${new Date().getFullYear()})
                    - type: 'expense' (default) or 'income' (if strictly implies income)
                    - category: Choose closest match from [${categories.map((c: any) => c.name).join(', ')}] based on seller/item.
@@ -1419,226 +1419,237 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                     const clean = res.replace(/```json/g, '').replace(/```/g, '').trim();
                     json = JSON.parse(clean);
                 }
+            }
             } catch (e) {
-                console.error("JSON Parse Error", e, res);
-                alert('解析失敗：AI 回傳格式無法讀取');
-                setLoading(false);
-                return;
-            }
-
-            const items = Array.isArray(json) ? json : [json];
-            const now = new Date();
-            const processed = items.map((it: any) => {
-                let amt = it.amount;
-                if (typeof amt === 'string') {
-                    amt = parseFloat(amt.replace(/,/g, ''));
-                }
-                it.amount = amt || 0;
-
-                if (!it.date) it.date = new Date().toISOString().split('T')[0];
-
-                const isDup = checkDuplicate(it);
-
-                const isFuture = new Date(it.date) > now;
-                const isLarge = it.amount > 100000;
-                const isAnomaly = isFuture || isLarge;
-
-                return {
-                    ...it,
-                    id: Math.random().toString(36).substr(2, 9),
-                    selected: !isDup && !isAnomaly,
-                    isDuplicate: isDup,
-                    isAnomaly: isAnomaly
-                };
-            });
-            setParsedItems(processed);
-        } catch (e) {
-            console.error(e);
-            alert('系統發生未預期錯誤');
-        } finally {
+            console.error("JSON Parse Error", e, res);
+            alert('解析失敗：AI 回傳格式無法讀取');
             setLoading(false);
+            return;
         }
-    };
 
-    const handleSave = async () => {
-        const selected = parsedItems.filter(i => i.selected);
-        if (selected.length === 0) return;
-        setLoading(true);
-        try {
-            const batch = [];
-            if (target === 'ledger') {
-                const col = collection(db, getCollectionPath(userId, groupId, 'transactions'));
-                const payerId = people.find((p: any) => p.isMe || p.uid === userId)?.id || people[0]?.id;
-                for (const item of selected) {
-                    batch.push(addDoc(col, {
-                        totalAmount: item.amount,
-                        description: item.description,
-                        category: item.category || '未分類',
-                        type: item.type || 'expense',
-                        date: Timestamp.fromDate(new Date(item.date)),
-                        currency: 'TWD',
-                        payers: { [payerId]: item.amount },
-                        splitDetails: { [payerId]: item.amount }
-                    }));
-                }
-            } else if (target === 'bank') {
-                const col = collection(db, getCollectionPath(userId, null, 'bankLogs'));
-                for (const item of selected) {
-                    batch.push(addDoc(col, {
-                        accountId: targetId,
-                        type: item.type || 'out',
-                        amount: item.amount,
-                        description: item.description,
-                        date: Timestamp.fromDate(new Date(item.date))
-                    }));
-                }
-            } else if (target === 'card') {
-                const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));
-                for (const item of selected) {
-                    batch.push(addDoc(col, {
-                        cardId: targetId,
-                        amount: item.amount,
-                        description: item.description,
-                        date: Timestamp.fromDate(new Date(item.date)),
-                        isReconciled: false
-                    }));
-                }
+        // Extract Array if wrapped (e.g. { "items": [...] })
+        let finalItems = json;
+        if (!Array.isArray(json) && typeof json === 'object') {
+            const keys = Object.keys(json);
+            if (keys.length === 1 && Array.isArray(json[keys[0]])) {
+                finalItems = json[keys[0]];
             }
-            await Promise.all(batch);
-            onClose();
-        } catch (e) {
-            console.error(e);
-            alert('儲存失敗');
-        } finally {
-            setLoading(false);
         }
-    };
 
-    const handleImageChange = (e: any) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => setImagePreview(reader.result as string);
-            reader.readAsDataURL(file);
-        }
-    };
+        const items = Array.isArray(finalItems) ? finalItems : [finalItems];
+        const now = new Date();
+        const processed = items.map((it: any) => {
+            let amt = it.amount;
+            // Robust Number Parsing: Remove everything except digits, dots, and minus sign
+            if (typeof amt === 'string') {
+                amt = parseFloat(amt.replace(/[^0-9.-]+/g, ''));
+            }
+            it.amount = amt || 0;
 
-    const handleFileChange = (e: any) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                if (event.target?.result) {
-                    setTextInput(event.target.result as string);
-                }
+            if (!it.date) it.date = new Date().toISOString().split('T')[0];
+
+            const isDup = checkDuplicate(it);
+
+            const isFuture = new Date(it.date) > now;
+            const isLarge = it.amount > 100000;
+            const isAnomaly = isFuture || isLarge;
+
+            return {
+                ...it,
+                id: Math.random().toString(36).substr(2, 9),
+                selected: !isDup && !isAnomaly,
+                isDuplicate: isDup,
+                isAnomaly: isAnomaly
             };
-            reader.readAsText(file);
+        });
+        setParsedItems(processed);
+    } catch (e) {
+        console.error(e);
+        alert('系統發生未預期錯誤');
+    } finally {
+        setLoading(false);
+    }
+};
+
+const handleSave = async () => {
+    const selected = parsedItems.filter(i => i.selected);
+    if (selected.length === 0) return;
+    setLoading(true);
+    try {
+        const batch = [];
+        if (target === 'ledger') {
+            const col = collection(db, getCollectionPath(userId, groupId, 'transactions'));
+            const payerId = people.find((p: any) => p.isMe || p.uid === userId)?.id || people[0]?.id;
+            for (const item of selected) {
+                batch.push(addDoc(col, {
+                    totalAmount: item.amount,
+                    description: item.description,
+                    category: item.category || '未分類',
+                    type: item.type || 'expense',
+                    date: Timestamp.fromDate(new Date(item.date)),
+                    currency: 'TWD',
+                    payers: { [payerId]: item.amount },
+                    splitDetails: { [payerId]: item.amount }
+                }));
+            }
+        } else if (target === 'bank') {
+            const col = collection(db, getCollectionPath(userId, null, 'bankLogs'));
+            for (const item of selected) {
+                batch.push(addDoc(col, {
+                    accountId: targetId,
+                    type: item.type || 'out',
+                    amount: item.amount,
+                    description: item.description,
+                    date: Timestamp.fromDate(new Date(item.date))
+                }));
+            }
+        } else if (target === 'card') {
+            const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));
+            for (const item of selected) {
+                batch.push(addDoc(col, {
+                    cardId: targetId,
+                    amount: item.amount,
+                    description: item.description,
+                    date: Timestamp.fromDate(new Date(item.date)),
+                    isReconciled: false
+                }));
+            }
         }
-    };
+        await Promise.all(batch);
+        onClose();
+    } catch (e) {
+        console.error(e);
+        alert('儲存失敗');
+    } finally {
+        setLoading(false);
+    }
+};
 
-    return (
-        <div className={styles.overlay}>
-            <div className={`${styles.content} max-w-2xl`}>
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-bold text-xl flex items-center gap-2"><Sparkles className="text-indigo-500" /> AI 批次匯入</h3>
-                    <button onClick={onClose}><X size={20} /></button>
-                </div>
-                {parsedItems.length === 0 ? (
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className={styles.label}>匯入目標</label>
-                                <select className={styles.input} value={target} onChange={e => setTarget(e.target.value as any)}>
-                                    <option value="ledger">記帳 (Ledger)</option>
-                                    <option value="bank">銀行 (Bank)</option>
-                                    <option value="card">信用卡 (Card)</option>
-                                </select>
-                            </div>
-                            <div>
-                                {target === 'bank' && (
-                                    <>
-                                        <label className={styles.label}>選擇帳戶</label>
-                                        <select className={styles.input} value={targetId} onChange={e => setTargetId(e.target.value)}>{accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
-                                    </>
-                                )}
-                                {target === 'card' && (
-                                    <>
-                                        <label className={styles.label}>選擇卡片</label>
-                                        <select className={styles.input} value={targetId} onChange={e => setTargetId(e.target.value)}>{creditCards.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-                                    </>
-                                )}
-                            </div>
-                        </div>
-                        <div className="flex bg-slate-100 p-1 rounded-xl">
-                            <button onClick={() => setMode('text')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode === 'text' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}><FileText size={16} /> 文字貼上</button>
-                            <button onClick={() => setMode('file')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode === 'file' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}><FileSpreadsheet size={16} /> CSV/檔案</button>
-                            <button onClick={() => setMode('image')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode === 'image' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}><ImageIcon size={16} /> 圖片掃描</button>
-                        </div>
+const handleImageChange = (e: any) => {
+    const file = e.target.files?.[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onloadend = () => setImagePreview(reader.result as string);
+        reader.readAsDataURL(file);
+    }
+};
 
-                        {mode === 'text' && (
-                            <textarea className="w-full h-40 p-3 border rounded-xl text-sm" placeholder={`貼上文字內容...\n例如: 1/15 午餐 120\n1/15 計程車 250`} value={textInput} onChange={e => setTextInput(e.target.value)}></textarea>
-                        )}
+const handleFileChange = (e: any) => {
+    const file = e.target.files?.[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            if (event.target?.result) {
+                setTextInput(event.target.result as string);
+            }
+        };
+        reader.readAsText(file);
+    }
+};
 
-                        {mode === 'file' && (
-                            <div className="border-2 border-dashed border-indigo-200 rounded-xl p-8 flex flex-col items-center justify-center bg-indigo-50/50 relative hover:bg-indigo-50 transition-colors">
-                                <FileSpreadsheet size={48} className="text-indigo-400 mb-3" />
-                                <div className="text-sm font-bold text-indigo-600 mb-1">上傳 CSV 或純文字檔</div>
-                                <div className="text-xs text-slate-400 mb-4">支援台灣雲端發票匯出格式</div>
-                                {textInput ? (
-                                    <div className="w-full bg-white p-3 rounded border text-xs text-slate-600 max-h-32 overflow-hidden relative">
-                                        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-white/90"></div>
-                                        {textInput.slice(0, 200)}...
-                                    </div>
-                                ) : (
-                                    <span className="text-xs bg-white px-3 py-1 rounded-full border shadow-sm text-slate-500">選擇檔案...</span>
-                                )}
-                                <input type="file" accept=".csv,.txt" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileChange} />
-                            </div>
-                        )}
-
-                        {mode === 'image' && (
-                            <div className="border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center bg-slate-50 relative">
-                                {imagePreview ? <img src={imagePreview} className="max-h-40 rounded object-contain" /> : <div className="text-slate-400 text-center"><Camera size={32} className="mx-auto mb-2" /><span className="text-xs">點擊上傳照片</span></div>}
-                                <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleImageChange} />
-                            </div>
-                        )}
-                        <button onClick={handleAnalyze} disabled={loading} className={styles.btnPrimary}>{loading ? <Loader2 className="animate-spin" /> : 'AI 智慧分析'}</button>
-                    </div>
-                ) : (
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                            <div className="text-sm text-slate-500">解析結果 ({parsedItems.length} 筆)</div>
-                            <button onClick={() => setParsedItems([])} className="text-sm text-indigo-600 font-bold">重新上傳</button>
-                        </div>
-                        <div className="max-h-[50vh] overflow-y-auto space-y-2">
-                            {parsedItems.map((item, idx) => (
-                                <div key={item.id} className={`flex items-center gap-3 p-3 rounded-xl border ${item.isDuplicate ? 'bg-amber-50 border-amber-200' : item.isAnomaly ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
-                                    <button onClick={() => { const newItems = [...parsedItems]; newItems[idx].selected = !newItems[idx].selected; setParsedItems(newItems); }}>
-                                        {item.selected ? <CheckSquare className="text-indigo-600" /> : <Square className="text-slate-300" />}
-                                    </button>
-                                    <div className="flex-1">
-                                        <div className="flex justify-between">
-                                            <input value={item.description} onChange={e => { const n = [...parsedItems]; n[idx].description = e.target.value; setParsedItems(n) }} className="font-bold text-slate-800 text-sm bg-transparent border-b border-transparent focus:border-indigo-300 outline-none w-full" />
-                                            <div className="flex items-center gap-1 text-slate-500">
-                                                {item.isDuplicate && <span title="重複資料" className="cursor-help"><AlertTriangle size={14} className="text-amber-500" /></span>}
-                                                {item.isAnomaly && <span title="數值異常 (大額或未來日期)" className="cursor-help"><AlertCircle size={14} className="text-red-500" /></span>}
-                                                <input type="number" value={item.amount} onChange={e => { const n = [...parsedItems]; n[idx].amount = parseFloat(e.target.value); setParsedItems(n) }} className="font-bold text-indigo-600 text-right w-20 bg-transparent border-b border-transparent focus:border-indigo-300 outline-none" />
-                                            </div>
-                                        </div>
-                                        <div className="flex gap-2 mt-1">
-                                            <input type="date" value={item.date} onChange={e => { const n = [...parsedItems]; n[idx].date = e.target.value; setParsedItems(n) }} className="text-xs text-slate-400 bg-transparent" />
-                                            {target === 'ledger' && (<select value={item.category} onChange={e => { const n = [...parsedItems]; n[idx].category = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{categories.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select>)}
-                                            {(target === 'bank' || target === 'ledger') && (<select value={item.type} onChange={e => { const n = [...parsedItems]; n[idx].type = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{target === 'ledger' ? <><option value="expense">支出</option><option value="income">收入</option></> : <><option value="out">支出</option><option value="in">收入</option></>}</select>)}
-                                        </div>
-                                    </div>
-                                    <button onClick={() => { setParsedItems(parsedItems.filter((_, i) => i !== idx)) }} className="text-slate-300 hover:text-red-500"><Trash2 size={16} /></button>
-                                </div>
-                            ))}
-                        </div>
-                        <button onClick={handleSave} disabled={loading} className={styles.btnPrimary}>{loading ? <Loader2 className="animate-spin" /> : `確認匯入 (${parsedItems.filter(i => i.selected).length} 筆)`}</button>
-                    </div>
-                )}
+return (
+    <div className={styles.overlay}>
+        <div className={`${styles.content} max-w-2xl`}>
+            <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-xl flex items-center gap-2"><Sparkles className="text-indigo-500" /> AI 批次匯入</h3>
+                <button onClick={onClose}><X size={20} /></button>
             </div>
+            {parsedItems.length === 0 ? (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className={styles.label}>匯入目標</label>
+                            <select className={styles.input} value={target} onChange={e => setTarget(e.target.value as any)}>
+                                <option value="ledger">記帳 (Ledger)</option>
+                                <option value="bank">銀行 (Bank)</option>
+                                <option value="card">信用卡 (Card)</option>
+                            </select>
+                        </div>
+                        <div>
+                            {target === 'bank' && (
+                                <>
+                                    <label className={styles.label}>選擇帳戶</label>
+                                    <select className={styles.input} value={targetId} onChange={e => setTargetId(e.target.value)}>{accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+                                </>
+                            )}
+                            {target === 'card' && (
+                                <>
+                                    <label className={styles.label}>選擇卡片</label>
+                                    <select className={styles.input} value={targetId} onChange={e => setTargetId(e.target.value)}>{creditCards.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                        <button onClick={() => setMode('text')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode === 'text' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}><FileText size={16} /> 文字貼上</button>
+                        <button onClick={() => setMode('file')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode === 'file' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}><FileSpreadsheet size={16} /> CSV/檔案</button>
+                        <button onClick={() => setMode('image')} className={`flex-1 py-2 rounded-lg text-sm font-bold flex justify-center gap-2 ${mode === 'image' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}><ImageIcon size={16} /> 圖片掃描</button>
+                    </div>
+
+                    {mode === 'text' && (
+                        <textarea className="w-full h-40 p-3 border rounded-xl text-sm" placeholder={`貼上文字內容...\n例如: 1/15 午餐 120\n1/15 計程車 250`} value={textInput} onChange={e => setTextInput(e.target.value)}></textarea>
+                    )}
+
+                    {mode === 'file' && (
+                        <div className="border-2 border-dashed border-indigo-200 rounded-xl p-8 flex flex-col items-center justify-center bg-indigo-50/50 relative hover:bg-indigo-50 transition-colors">
+                            <FileSpreadsheet size={48} className="text-indigo-400 mb-3" />
+                            <div className="text-sm font-bold text-indigo-600 mb-1">上傳 CSV 或純文字檔</div>
+                            <div className="text-xs text-slate-400 mb-4">支援台灣雲端發票匯出格式</div>
+                            {textInput ? (
+                                <div className="w-full bg-white p-3 rounded border text-xs text-slate-600 max-h-32 overflow-hidden relative">
+                                    <div className="absolute inset-0 bg-gradient-to-b from-transparent to-white/90"></div>
+                                    {textInput.slice(0, 200)}...
+                                </div>
+                            ) : (
+                                <span className="text-xs bg-white px-3 py-1 rounded-full border shadow-sm text-slate-500">選擇檔案...</span>
+                            )}
+                            <input type="file" accept=".csv,.txt" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileChange} />
+                        </div>
+                    )}
+
+                    {mode === 'image' && (
+                        <div className="border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center bg-slate-50 relative">
+                            {imagePreview ? <img src={imagePreview} className="max-h-40 rounded object-contain" /> : <div className="text-slate-400 text-center"><Camera size={32} className="mx-auto mb-2" /><span className="text-xs">點擊上傳照片</span></div>}
+                            <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleImageChange} />
+                        </div>
+                    )}
+                    <button onClick={handleAnalyze} disabled={loading} className={styles.btnPrimary}>{loading ? <Loader2 className="animate-spin" /> : 'AI 智慧分析'}</button>
+                </div>
+            ) : (
+                <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                        <div className="text-sm text-slate-500">解析結果 ({parsedItems.length} 筆)</div>
+                        <button onClick={() => setParsedItems([])} className="text-sm text-indigo-600 font-bold">重新上傳</button>
+                    </div>
+                    <div className="max-h-[50vh] overflow-y-auto space-y-2">
+                        {parsedItems.map((item, idx) => (
+                            <div key={item.id} className={`flex items-center gap-3 p-3 rounded-xl border ${item.isDuplicate ? 'bg-amber-50 border-amber-200' : item.isAnomaly ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}>
+                                <button onClick={() => { const newItems = [...parsedItems]; newItems[idx].selected = !newItems[idx].selected; setParsedItems(newItems); }}>
+                                    {item.selected ? <CheckSquare className="text-indigo-600" /> : <Square className="text-slate-300" />}
+                                </button>
+                                <div className="flex-1">
+                                    <div className="flex justify-between">
+                                        <input value={item.description} onChange={e => { const n = [...parsedItems]; n[idx].description = e.target.value; setParsedItems(n) }} className="font-bold text-slate-800 text-sm bg-transparent border-b border-transparent focus:border-indigo-300 outline-none w-full" />
+                                        <div className="flex items-center gap-1 text-slate-500">
+                                            {item.isDuplicate && <span title="重複資料" className="cursor-help"><AlertTriangle size={14} className="text-amber-500" /></span>}
+                                            {item.isAnomaly && <span title="數值異常 (大額或未來日期)" className="cursor-help"><AlertCircle size={14} className="text-red-500" /></span>}
+                                            <input type="number" value={item.amount} onChange={e => { const n = [...parsedItems]; n[idx].amount = parseFloat(e.target.value); setParsedItems(n) }} className="font-bold text-indigo-600 text-right w-20 bg-transparent border-b border-transparent focus:border-indigo-300 outline-none" />
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2 mt-1">
+                                        <input type="date" value={item.date} onChange={e => { const n = [...parsedItems]; n[idx].date = e.target.value; setParsedItems(n) }} className="text-xs text-slate-400 bg-transparent" />
+                                        {target === 'ledger' && (<select value={item.category} onChange={e => { const n = [...parsedItems]; n[idx].category = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{categories.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select>)}
+                                        {(target === 'bank' || target === 'ledger') && (<select value={item.type} onChange={e => { const n = [...parsedItems]; n[idx].type = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{target === 'ledger' ? <><option value="expense">支出</option><option value="income">收入</option></> : <><option value="out">支出</option><option value="in">收入</option></>}</select>)}
+                                    </div>
+                                </div>
+                                <button onClick={() => { setParsedItems(parsedItems.filter((_, i) => i !== idx)) }} className="text-slate-300 hover:text-red-500"><Trash2 size={16} /></button>
+                            </div>
+                        ))}
+                    </div>
+                    <button onClick={handleSave} disabled={loading} className={styles.btnPrimary}>{loading ? <Loader2 className="animate-spin" /> : `確認匯入 (${parsedItems.filter(i => i.selected).length} 筆)`}</button>
+                </div>
+            )}
         </div>
-    )
+    </div>
+)
 }
