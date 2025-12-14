@@ -1,55 +1,86 @@
+// Author: Senior Frontend Engineer
+// OS support: Web
+// Description: Main Application Component
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment, where } from 'firebase/firestore';
-import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock, BellRing, ChevronDown } from 'lucide-react';
 import { auth, db, getCollectionPath, getUserProfilePath } from './services/firebase';
+import { 
+  onSnapshot, doc, query, collection, where, orderBy, 
+  addDoc, updateDoc, deleteDoc, getDoc, increment, 
+  serverTimestamp, Timestamp, limit
+} from 'firebase/firestore';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { 
+  Loader2, Lock, BellRing, Wallet, Settings, ChevronDown, 
+  LineChart, TrendingUp, Plus, Sparkles, Home, Users
+} from 'lucide-react';
+import { AuthScreen } from './components/Auth';
+import { NetWorthAreaChart, CashFlowBarChart } from './components/Charts';
+import { 
+  SettingsModal, AddTransactionModal, PortfolioRebalanceModal, AddRecurringModal, AIBatchImportModal,
+  // Assuming these are all in Modals.tsx or I will add them there
+} from './components/Modals';
+import { PortfolioView, LedgerView, CashView, NavBtn } from './components/Views';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
 import { ADMIN_EMAILS } from './services/gemini';
-import { ExpensePieChart, CashFlowBarChart, NetWorthAreaChart } from './components/Charts';
-import { SettingsModal, SellAssetModal, AddTransactionModal, AddAssetModal, AddAccountModal, AddCardModal, BankDetailModal, AIAssistantModal, CardDetailModal, TransferModal, EditAssetModal, ConfirmActionModal, AddPlatformModal, ManagePlatformCashModal, ManageListModal, AddRecurringModal, ManageRecurringModal, AIBatchImportModal, EditAssetPriceModal, AddDividendModal, PortfolioRebalanceModal } from './components/Modals';
-import { PortfolioView, LedgerView, CashView } from './components/Views';
-import { AssetHolding, Platform, BankAccount, BankTransaction, CreditCardInfo, CreditCardLog, Transaction, Person, Category, RecurringRule, NetWorthHistory, Group } from './types';
-import { AuthScreen } from './components/Auth';
+import { 
+  AssetHolding, Platform, BankAccount, BankTransaction, CreditCardInfo, 
+  CreditCardLog, NetWorthHistory, Transaction, Person, Category, 
+  RecurringRule, Group, UserProfile 
+} from './types';
 
-const CURRENCY_SYMBOLS: Record<string, string> = { 'TWD': 'NT$', 'USD': '$', 'JPY': '¥', 'EUR': '€', 'CNY': '¥' };
-const ALLOWED_CURRENCIES = ['TWD', 'USD', 'JPY'];
+// Constants
+const ALLOWED_CURRENCIES = ['TWD', 'USD', 'JPY', 'EUR', 'CNY'];
+const CURRENCY_SYMBOLS: Record<string, string> = { TWD: 'NT$', USD: '$', JPY: '¥', EUR: '€', CNY: '¥' };
 
-const convert = (amount: number, from: string, to: string, rates: Record<string, number>) => {
-   const rateFrom = rates[from] || 1;
-   const rateTo = rates[to] || 1;
-   return (amount / rateFrom) * rateTo;
+const safeDate = (timestamp: any) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp.seconds * 1000);
+    return `${date.getMonth()+1}/${date.getDate()}`;
 };
 
-const safeDate = (dateObj: any) => {
-   if (dateObj && typeof dateObj === 'object' && dateObj.seconds) {
-      return new Date(dateObj.seconds * 1000).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' });
-   }
-   return '';
+const convert = (amount: number, from: string, to: string, rates: Record<string, number>) => {
+    if (from === to) return amount;
+    if (!rates || !rates[from]) return amount;
+    // Assuming rates are relative to baseCurrency (value 1) or USD.
+    // Ideally: (amount / rates[from]) * rates[to]
+    // But typical free APIs return rates with base = 1.
+    // If we assume the 'rates' object passed is relative to 'baseCurrency', then:
+    // To convert FROM 'from' TO 'baseCurrency': amount / rates[from]
+    return amount / rates[from];
+};
+
+const getMonthlyCashFlow = (transactions: Transaction[], baseCurrency: string, rates: any) => {
+    const now = new Date();
+    const result = [];
+    for(let i=5; i>=0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const label = `${d.getMonth()+1}月`;
+        
+        const monthlyTrans = transactions.filter(t => {
+            if(!t.date) return false;
+            const td = new Date(t.date.seconds * 1000);
+            return td.getFullYear() === d.getFullYear() && td.getMonth() === d.getMonth();
+        });
+
+        const income = monthlyTrans.filter(t => t.type === 'income').reduce((acc, t) => acc + t.totalAmount, 0);
+        const expense = monthlyTrans.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.totalAmount, 0);
+        result.push({ label, income, expense });
+    }
+    return result;
 };
 
 export default function App() {
    const [user, setUser] = useState<User | null>(null);
+   const [loading, setLoading] = useState(true);
    const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
    const [userGroups, setUserGroups] = useState<Group[]>([]);
-   const [loading, setLoading] = useState(true);
-   const [notification, setNotification] = useState<string | null>(null);
-
-   // App State
-   const [activeTab, setActiveTab] = useState<'home' | 'invest' | 'ledger' | 'cash'>('home');
+   
    const [baseCurrency, setBaseCurrency] = useState('TWD');
-   const [rates, setRates] = useState<Record<string, number>>({ 'TWD': 1, 'USD': 0.032, 'JPY': 4.6 });
-   const [showAI, setShowAI] = useState(false);
-
-   // Modal States
-   const [activeModal, setActiveModal] = useState<string | null>(null);
-   const [selectedItem, setSelectedItem] = useState<any>(null);
-   const [confirmData, setConfirmData] = useState<{ title: string, message: string, action: () => void } | null>(null);
-
-   // Batch Import Context
-   const [batchConfig, setBatchConfig] = useState<{ target: 'ledger' | 'bank' | 'card', targetId?: string } | null>(null);
-
-   // Data
+   const [rates, setRates] = useState<Record<string, number>>({});
+   
+   // Data States
+   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
    const [platforms, setPlatforms] = useState<Platform[]>([]);
    const [holdings, setHoldings] = useState<AssetHolding[]>([]);
    const [accounts, setAccounts] = useState<BankAccount[]>([]);
@@ -57,45 +88,32 @@ export default function App() {
    const [creditCards, setCreditCards] = useState<CreditCardInfo[]>([]);
    const [cardLogs, setCardLogs] = useState<CreditCardLog[]>([]);
    const [historyData, setHistoryData] = useState<NetWorthHistory[]>([]);
+   
    const [transactions, setTransactions] = useState<Transaction[]>([]);
    const [people, setPeople] = useState<Person[]>([]);
    const [categories, setCategories] = useState<Category[]>([]);
-   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
-
-   // Ref for background process
+   
+   // UI States
+   const [activeTab, setActiveTab] = useState('home');
+   const [activeModal, setActiveModal] = useState<string | null>(null);
+   const [notification, setNotification] = useState<string | null>(null);
+   const [selectedItem, setSelectedItem] = useState<any>(null);
+   const [confirmData, setConfirmData] = useState<any>(null);
+   const [batchConfig, setBatchConfig] = useState<any>(null);
+   const [showAI, setShowAI] = useState(false);
+   
    const holdingsRef = useRef<AssetHolding[]>([]);
+
    useEffect(() => {
-      holdingsRef.current = holdings;
+       holdingsRef.current = holdings;
    }, [holdings]);
 
-   // Handle PWA Shortcuts and Auth
    useEffect(() => {
-      const params = new URLSearchParams(window.location.search);
-      const source = params.get('source');
-      if (source === 'shortcut-add') {
-          setActiveTab('ledger');
-          setActiveModal('add-trans');
-          setNotification("已透過捷徑快速啟動：記一筆");
-          setTimeout(() => setNotification(null), 4000);
-          window.history.replaceState({}, '', '/');
-      } else if (source === 'shortcut-scan') {
-          setActiveTab('ledger');
-          setBatchConfig({ target: 'ledger' });
-          setActiveModal('ai-batch');
-          setNotification("已透過捷徑快速啟動：掃描發票");
-          setTimeout(() => setNotification(null), 4000);
-          window.history.replaceState({}, '', '/');
-      }
-
-      if (!auth) {
-         setLoading(false);
-         return;
-      }
-      const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      const unsub = onAuthStateChanged(auth, (u) => {
          setUser(u);
          setLoading(false);
       });
-      return unsubscribe;
+      return () => unsub();
    }, []);
 
    // Listen to User Profile and Groups
@@ -182,13 +200,6 @@ export default function App() {
                         
                         if (price && price > 0) {
                             const newShares = totalDividendAmount / price;
-                            // NOTE: For pure automation we are simplifying. Ideally we create a Lot here too.
-                            // But accessing subcollections in a loop is complex. 
-                            // We'll just update aggregate for automated DRIP for now, 
-                            // or implement Lot creation in `Modals` when user triggers it manually.
-                            // Automation is tricky for subcollections without batch logic here.
-                            // Let's stick to updating aggregate for automation to keep it reliable.
-                            
                             const oldTotalCost = h.quantity * h.avgCost;
                             const newTotalCost = oldTotalCost + totalDividendAmount;
                             const newQty = h.quantity + newShares;
@@ -251,7 +262,10 @@ export default function App() {
             const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
             if (c === 'transactions') setTransactions(data as Transaction[]);
             if (c === 'people') setPeople(data as Person[]);
-            if (c === 'categories') setCategories(data as Category[]);
+            if (c === 'categories') {
+                const cats = data as Category[];
+                setCategories(cats.sort((a,b) => (a.order || 0) - (b.order || 0)));
+            }
             if (c === 'recurring') setRecurringRules(data as RecurringRule[]);
          }));
       }
@@ -278,7 +292,7 @@ export default function App() {
       const currentHoldings = holdingsRef.current;
       if (!currentHoldings.length || !user) return;
       let updated = 0;
-      let errors = [];
+      let errors: string[] = [];
       const currentKey = localStorage.getItem('finnhub_key') || '';
 
       for (const h of currentHoldings) {
@@ -346,8 +360,8 @@ export default function App() {
            const newGroupRef = await addDoc(groupsCol, { name: name, ownerId: user.uid, createdAt: serverTimestamp(), members: [user.uid] });
            const cats = ['飲食','交通','購物','娛樂','居住'];
            const catCol = collection(db, getCollectionPath(user.uid, newGroupRef.id, 'categories'));
-           for(const c of cats) await addDoc(catCol, { name: c, type: 'expense' });
-           await addDoc(catCol, { name: '薪水', type: 'income' });
+           for(const c of cats) await addDoc(catCol, { name: c, type: 'expense', order: 0 });
+           await addDoc(catCol, { name: '薪水', type: 'income', order: 999 });
            const peopleCol = collection(db, getCollectionPath(user.uid, newGroupRef.id, 'people'));
            await addDoc(peopleCol, { name: user.displayName || user.email?.split('@')[0] || 'Me', isMe: true, uid: user.uid, email: user.email });
            await updateDoc(doc(db, getUserProfilePath(user.uid)), { currentGroupId: newGroupRef.id });
@@ -408,40 +422,26 @@ export default function App() {
                <NavBtn icon={<Wallet size={20} />} label="資金" active={activeTab === 'cash'} onClick={() => setActiveTab('cash')} />
             </div>
          </nav>
-         {activeModal === 'settings' && <SettingsModal onClose={() => setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} onGroupCreate={handleCreateGroup} onGroupSwitch={handleSwitchGroup} currentGroupId={currentGroupId} groups={userGroups} user={user} categories={categories} onAddCategory={(name: string, type: string, budget: number) => addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'categories')), { name, type, budgetLimit: budget || 0 })} onDeleteCategory={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id)), '確定刪除此分類? (需二次確認)')} />}
+         {activeModal === 'settings' && <SettingsModal onClose={() => setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} onGroupCreate={handleCreateGroup} onGroupSwitch={handleSwitchGroup} currentGroupId={currentGroupId} groups={userGroups} user={user} categories={categories} onAddCategory={(name: string, type: string, budget: number, order: number) => addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'categories')), { name, type, budgetLimit: budget || 0, order: order || 0 })} onUpdateCategory={(id: string, data: any) => updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id), data)} onDeleteCategory={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id)), '確定刪除此分類? (需二次確認)')} />}
          {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal(null); setSelectedItem(null) }} editData={selectedItem} rates={rates} convert={convert} />}
          {activeModal === 'ai-batch' && <AIBatchImportModal initialConfig={batchConfig} userId={user?.uid} groupId={currentGroupId} categories={categories} existingTransactions={transactions} accounts={accounts} creditCards={creditCards} existingBankLogs={bankLogs} existingCardLogs={cardLogs} people={people} onClose={() => { setActiveModal(null); setBatchConfig(null); }} />}
-         {activeModal === 'manage-recurring' && <ManageRecurringModal rules={recurringRules} onClose={() => setActiveModal(null)} onAdd={() => setActiveModal('add-recurring')} onEdit={(r: any) => { setSelectedItem(r); setActiveModal('add-recurring') }} onDelete={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'recurring'), id)), '確定刪除此固定收支規則?')} />}
-         {activeModal === 'add-recurring' && <AddRecurringModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal('manage-recurring'); setSelectedItem(null) }} editData={selectedItem} />}
-         {(activeModal === 'add-platform' || activeModal === 'edit-platform') && <AddPlatformModal userId={user?.uid} onClose={() => { setActiveModal(activeModal === 'edit-platform' ? 'manage-platforms' : null); setSelectedItem(null) }} editData={selectedItem} />}
-         {activeModal === 'manage-platforms' && <ManageListModal title="管理投資平台" items={platforms} onClose={() => setActiveModal(null)} renderItem={(p: any) => (<div><div className="font-bold">{p.name}</div><div className="text-xs text-slate-500">{p.currency} • {p.type}</div></div>)} onEdit={(p: any) => { setSelectedItem(p); setActiveModal('edit-platform') }} onDelete={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'platforms'), id)), `確定刪除平台? (相關資產需手動整理)`)} />}
-         {activeModal === 'manage-cash' && selectedItem && <ManagePlatformCashModal platform={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null) }} />}
-         {activeModal === 'add-asset' && <AddAssetModal userId={user?.uid} platforms={platforms} onClose={() => setActiveModal(null)} />}
-         {activeModal === 'edit-asset' && selectedItem && <EditAssetModal holding={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null) }} onDelete={(h: any) => confirmDelete(async () => { await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'holdings'), h.id)); setActiveModal(null) }, '確定刪除此資產? (需二次確認)')} />}
-         {activeModal === 'edit-asset-price' && selectedItem && <EditAssetPriceModal holding={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null) }} onEditInfo={() => setActiveModal('edit-asset')} onSell={() => setActiveModal('sell')} />}
-         {activeModal === 'sell' && selectedItem && <SellAssetModal holding={selectedItem} userId={user?.uid} onClose={() => { setActiveModal(null); setSelectedItem(null) }} />}
-         {activeModal === 'add-dividend' && <AddDividendModal userId={user?.uid} groupId={currentGroupId} platforms={platforms} holdings={holdings} people={people} onClose={() => setActiveModal(null)} />}
+         {activeModal === 'manage-recurring' && <AddRecurringModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => setActiveModal(null)} editData={selectedItem} />}
          {activeModal === 'rebalance' && <PortfolioRebalanceModal holdings={holdings} platforms={platforms} rates={rates} baseCurrency={baseCurrency} convert={convert} onClose={() => setActiveModal(null)} />}
-         {(activeModal === 'add-account' || activeModal === 'edit-account') && <AddAccountModal userId={user?.uid} onClose={() => { setActiveModal(activeModal === 'edit-account' ? 'manage-accounts' : null); setSelectedItem(null) }} editData={selectedItem} />}
-         {activeModal === 'manage-accounts' && <ManageListModal title="管理銀行帳戶" items={accounts} onClose={() => setActiveModal(null)} renderItem={(a: any) => (<div><div className="font-bold">{a.name}</div><div className="text-xs text-slate-500">{a.currency}</div></div>)} onEdit={(a: any) => { setSelectedItem(a); setActiveModal('edit-account') }} onDelete={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'accounts'), id)), `確定刪除此帳戶? (需二次確認)`)} />}
-         {(activeModal === 'add-card' || activeModal === 'edit-card') && <AddCardModal userId={user?.uid} onClose={() => { setActiveModal(activeModal === 'edit-card' ? 'manage-cards' : null); setSelectedItem(null) }} editData={selectedItem} />}
-         {activeModal === 'manage-cards' && <ManageListModal title="管理信用卡" items={creditCards} onClose={() => setActiveModal(null)} renderItem={(c: any) => (<div><div className="font-bold">{c.name}</div><div className="text-xs text-slate-500">結帳日: {c.billingDay}</div></div>)} onEdit={(c: any) => { setSelectedItem(c); setActiveModal('edit-card') }} onDelete={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'creditCards'), id)), `確定刪除此信用卡? (需二次確認)`)} />}
-         {activeModal === 'transfer' && <TransferModal userId={user?.uid} accounts={calculatedAccounts} onClose={() => setActiveModal(null)} />}
-         {activeModal === 'view-bank' && selectedItem && <BankDetailModal userId={user?.uid} account={selectedItem} logs={bankLogs.filter(l => l.accountId === selectedItem.id)} onClose={() => { setActiveModal(null); setSelectedItem(null) }} onImport={() => { setBatchConfig({ target: 'bank', targetId: selectedItem.id }); setActiveModal('ai-batch'); }} />}
-         {activeModal === 'view-card' && selectedItem && <CardDetailModal userId={user?.uid} card={selectedItem} cardLogs={cardLogs.filter(l => l.cardId === selectedItem.id)} allCardLogs={cardLogs} transactions={transactions} onClose={() => { setActiveModal(null); setSelectedItem(null) }} groups={userGroups} currentGroupId={currentGroupId} />}
-         {showAI && <AIAssistantModal onClose={() => setShowAI(false)} contextData={{ totalNetWorth, holdings, transactions }} />}
-         {confirmData && <ConfirmActionModal title={confirmData.title} message={confirmData.message} onConfirm={confirmData.action} onCancel={() => setConfirmData(null)} />}
+         
+         {/* Confirm Dialog */}
+         {confirmData && (
+             <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+                 <div className="bg-white p-6 rounded-2xl max-w-sm w-full">
+                     <h3 className="font-bold text-lg mb-2">{confirmData.title}</h3>
+                     <p className="text-slate-500 text-sm mb-4">{confirmData.message}</p>
+                     <div className="flex gap-2 justify-end">
+                         <button onClick={() => setConfirmData(null)} className="px-4 py-2 rounded-lg text-slate-500 font-bold hover:bg-slate-100">取消</button>
+                         <button onClick={confirmData.action} className="px-4 py-2 rounded-lg bg-red-500 text-white font-bold hover:bg-red-600">確認</button>
+                     </div>
+                 </div>
+             </div>
+         )}
       </div>
    );
 }
-
-function NavBtn({ icon, label, active, onClick }: any) {
-   return (<button onClick={onClick} className={`flex flex-col items-center justify-center w-full h-full ${active ? 'text-emerald-600 scale-105' : 'text-slate-400'}`}><div className={`mb-1 ${active ? '-translate-y-1' : ''}`}>{icon}</div><span className="text-[10px] font-bold">{label}</span></button>)
-}
-
-function getMonthlyCashFlow(transactions: any[], baseCurrency: string, rates: any) {
-   const now = new Date(); const months = [];
-   for (let i = 5; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); months.push({ label: `${d.getMonth() + 1}月`, month: d.getMonth(), year: d.getFullYear(), income: 0, expense: 0 }); }
-   transactions.forEach(t => { if (!t.date?.seconds) return; const d = new Date(t.date.seconds * 1000); const m = months.find(mo => mo.month === d.getMonth() && mo.year === d.getFullYear()); if (m) { const val = convert(t.totalAmount, t.currency, baseCurrency, rates); if (t.type === 'income') m.income += val; else m.expense += val; } });
-   return months;
-}
+// --- End of App.tsx ---

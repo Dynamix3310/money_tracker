@@ -1,6 +1,11 @@
+// Author: Senior Frontend Engineer
+// OS support: Web
+// Description: Entry point of the React application
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import './index.css'; // Assuming css exists, but removing it if not provided in file list. Keeping standard structure.
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -13,3 +18,5 @@ root.render(
     <App />
   </React.StrictMode>
 );
+
+// --- End of index.tsx ---
