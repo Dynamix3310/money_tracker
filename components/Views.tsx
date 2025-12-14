@@ -252,9 +252,14 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
                                                     <div className={`font-bold font-mono ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
                                                         {t.type === 'income' ? '+' : ''}{t.totalAmount.toLocaleString()} <span className="text-xs font-normal text-slate-400">$</span>
                                                     </div>
+                                                    {myShare > 0 && t.payers?.[myPersonId] > 0 && (
+                                                        <div className="text-xs text-sky-600 font-bold mt-0.5">
+                                                            <span className="text-[10px] text-slate-400 font-normal mr-1">已付</span>
+                                                            {Math.round(t.payers[myPersonId]).toLocaleString()}
+                                                        </div>
+                                                    )}
                                                     {myShare > 0 && (
                                                         <div className="text-xs text-indigo-600 font-bold mt-0.5">
-                                                            {t.payers?.[myPersonId] > 0 && <span className="text-[10px] text-sky-600 font-normal mr-1 block">已付 ${Math.round(t.payers[myPersonId]).toLocaleString()}</span>}
                                                             <span className="text-[10px] text-slate-400 font-normal mr-1">自付</span>
                                                             {Math.round(myShare).toLocaleString()}
                                                         </div>
