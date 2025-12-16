@@ -15,6 +15,15 @@ import { AuthScreen } from './components/Auth';
 const CURRENCY_SYMBOLS: Record<string, string> = { 'TWD': 'NT$', 'USD': '$', 'JPY': '¥', 'EUR': '€', 'CNY': '¥' };
 const ALLOWED_CURRENCIES = ['TWD', 'USD', 'JPY'];
 
+const THEME_COLORS: any = {
+   'indigo': { 50: '#eef2ff', 100: '#e0e7ff', 200: '#c7d2fe', 300: '#a5b4fc', 400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 800: '#3730a3', 900: '#312e81', 950: '#1e1b4b' },
+   'blue': { 50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8', 800: '#1e40af', 900: '#1e3a8a', 950: '#172554' },
+   'emerald': { 50: '#ecfdf5', 100: '#d1fae5', 200: '#a7f3d0', 300: '#6ee7b7', 400: '#34d399', 500: '#10b981', 600: '#059669', 700: '#047857', 800: '#065f46', 900: '#064e3b', 950: '#022c22' },
+   'rose': { 50: '#fff1f2', 100: '#ffe4e6', 200: '#fecdd3', 300: '#fda4af', 400: '#fb7185', 500: '#f43f5e', 600: '#e11d48', 700: '#be123c', 800: '#9f1239', 900: '#881337', 950: '#4c0519' },
+   'amber': { 50: '#fffbeb', 100: '#fef3c7', 200: '#fde68a', 300: '#fcd34d', 400: '#fbbf24', 500: '#f59e0b', 600: '#d97706', 700: '#b45309', 800: '#92400e', 900: '#78350f', 950: '#451a03' },
+   'violet': { 50: '#f5f3ff', 100: '#ede9fe', 200: '#ddd6fe', 300: '#c4b5fd', 400: '#a78bfa', 500: '#8b5cf6', 600: '#7c3aed', 700: '#6d28d9', 800: '#5b21b6', 900: '#4c1d95', 950: '#2e1065' },
+};
+
 const convert = (amount: number, from: string, to: string, rates: Record<string, number>) => {
    const rateFrom = rates[from] || 1;
    const rateTo = rates[to] || 1;
@@ -40,6 +49,17 @@ export default function App() {
    const [baseCurrency, setBaseCurrency] = useState('TWD');
    const [rates, setRates] = useState<Record<string, number>>({ 'TWD': 1, 'USD': 0.032, 'JPY': 4.6 });
    const [showAI, setShowAI] = useState(false);
+   const [themeColor, setThemeColor] = useState(localStorage.getItem('theme_color') || 'indigo');
+
+   // Apply Theme
+   useEffect(() => {
+      const colors = THEME_COLORS[themeColor] || THEME_COLORS['indigo'];
+      const root = document.documentElement;
+      Object.entries(colors).forEach(([shade, value]) => {
+         root.style.setProperty(`--color-indigo-${shade}`, value as string);
+      });
+      localStorage.setItem('theme_color', themeColor);
+   }, [themeColor]);
 
    // Modal States
    const [activeModal, setActiveModal] = useState<string | null>(null);
@@ -274,6 +294,28 @@ export default function App() {
       return investVal + platformCashVal + cashVal;
    }, [holdings, platforms, calculatedAccounts, baseCurrency, rates]);
 
+   // Auto Record Daily Net Worth
+   useEffect(() => {
+      if (!user || totalNetWorth === 0 || historyData.length === 0) return;
+
+      const today = new Date().toISOString().split('T')[0];
+      const lastEntry = historyData[historyData.length - 1];
+      const lastDate = lastEntry.date?.seconds ? new Date(lastEntry.date.seconds * 1000).toISOString().split('T')[0] : '';
+
+      if (lastDate !== today) {
+         // Add new history entry
+         const addHistory = async () => {
+            const historyCol = collection(db, getCollectionPath(user.uid, null, 'history'));
+            await addDoc(historyCol, {
+               date: serverTimestamp(),
+               amount: totalNetWorth,
+               currency: baseCurrency
+            });
+         };
+         addHistory();
+      }
+   }, [user, totalNetWorth, historyData, baseCurrency]);
+
    const updateAssetPrices = async (showFeedback = true) => {
       const currentHoldings = holdingsRef.current;
       if (!currentHoldings.length || !user) return;
@@ -408,7 +450,7 @@ export default function App() {
                <NavBtn icon={<Wallet size={20} />} label="資金" active={activeTab === 'cash'} onClick={() => setActiveTab('cash')} />
             </div>
          </nav>
-         {activeModal === 'settings' && <SettingsModal onClose={() => setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} onGroupCreate={handleCreateGroup} onGroupSwitch={handleSwitchGroup} currentGroupId={currentGroupId} groups={userGroups} user={user} categories={categories} onAddCategory={(name: string, type: string, budget: number) => addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'categories')), { name, type, budgetLimit: budget || 0 })} onUpdateCategory={(id: string, data: any) => updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id), data)} onDeleteCategory={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id)), '確定刪除此分類? (需二次確認)')} />}
+         {activeModal === 'settings' && <SettingsModal onClose={() => setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} onGroupCreate={handleCreateGroup} onGroupSwitch={handleSwitchGroup} currentGroupId={currentGroupId} groups={userGroups} user={user} categories={categories} onAddCategory={(name: string, type: string, budget: number) => addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'categories')), { name, type, budgetLimit: budget || 0 })} onUpdateCategory={(id: string, data: any) => updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id), data)} onDeleteCategory={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id)), '確定刪除此分類? (需二次確認)')} currentTheme={themeColor} onSetTheme={setThemeColor} />}
          {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal(null); setSelectedItem(null) }} editData={selectedItem} rates={rates} convert={convert} />}
          {activeModal === 'ai-batch' && <AIBatchImportModal initialConfig={batchConfig} userId={user?.uid} groupId={currentGroupId} categories={categories} existingTransactions={transactions} accounts={accounts} creditCards={creditCards} existingBankLogs={bankLogs} existingCardLogs={cardLogs} people={people} onClose={() => { setActiveModal(null); setBatchConfig(null); }} />}
          {activeModal === 'manage-recurring' && <ManageRecurringModal rules={recurringRules} onClose={() => setActiveModal(null)} onAdd={() => setActiveModal('add-recurring')} onEdit={(r: any) => { setSelectedItem(r); setActiveModal('add-recurring') }} onDelete={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'recurring'), id)), '確定刪除此固定收支規則?')} />}

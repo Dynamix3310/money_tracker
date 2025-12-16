@@ -130,7 +130,7 @@ export const AddRecurringModal = ({ userId, groupId, people, categories, onClose
 }
 
 // --- Settings ---
-export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, currentGroupId, groups, user, categories: rawCategories, onAddCategory, onDeleteCategory, onUpdateCategory, onGroupJoin, onGroupCreate, onGroupSwitch }: any) => {
+export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, currentGroupId, groups, user, categories: rawCategories, onAddCategory, onDeleteCategory, onUpdateCategory, onGroupJoin, onGroupCreate, onGroupSwitch, currentTheme, onSetTheme }: any) => {
     const [activeTab, setActiveTab] = useState('ledger');
     const [newCat, setNewCat] = useState('');
     const [catType, setCatType] = useState<'expense' | 'income'>('expense');
@@ -179,6 +179,7 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
                 <div className="flex bg-slate-100 p-1 rounded-xl mb-6 overflow-x-auto">
                     <button onClick={() => setActiveTab('ledger')} className={`flex-1 py-2 px-2 text-xs font-bold rounded-lg whitespace-nowrap ${activeTab === 'ledger' ? 'bg-white shadow' : 'text-slate-400'}`}>帳本管理</button>
                     <button onClick={() => setActiveTab('category')} className={`flex-1 py-2 px-2 text-xs font-bold rounded-lg whitespace-nowrap ${activeTab === 'category' ? 'bg-white shadow' : 'text-slate-400'}`}>分類與預算</button>
+                    <button onClick={() => setActiveTab('appearance')} className={`flex-1 py-2 px-2 text-xs font-bold rounded-lg whitespace-nowrap ${activeTab === 'appearance' ? 'bg-white shadow' : 'text-slate-400'}`}>外觀</button>
                     <button onClick={() => setActiveTab('keys')} className={`flex-1 py-2 px-2 text-xs font-bold rounded-lg whitespace-nowrap ${activeTab === 'keys' ? 'bg-white shadow' : 'text-slate-400'}`}>API & 資料</button>
                 </div>
 
@@ -219,6 +220,32 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
                             <div className="flex gap-2 mt-1">
                                 <div className="bg-slate-100 px-3 py-2 rounded-lg text-xs font-mono flex-1 truncate select-all text-slate-600">{currentGroupId}</div>
                                 <button onClick={() => navigator.clipboard.writeText(currentGroupId)} className="bg-slate-200 text-slate-600 p-2 rounded-lg hover:bg-slate-300"><Copy size={14} /></button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {activeTab === 'appearance' && (
+                    <div className="space-y-4">
+                        <div>
+                            <label className={styles.label}>主題色系</label>
+                            <div className="grid grid-cols-3 gap-3">
+                                {[
+                                    { id: 'indigo', name: '經典藍紫', color: '#4f46e5' },
+                                    { id: 'blue', name: '海洋藍', color: '#2563eb' },
+                                    { id: 'emerald', name: '翡翠綠', color: '#059669' },
+                                    { id: 'rose', name: '玫瑰紅', color: '#e11d48' },
+                                    { id: 'amber', name: '琥珀黃', color: '#d97706' },
+                                    { id: 'violet', name: '皇室紫', color: '#7c3aed' },
+                                ].map(t => (
+                                    <button
+                                        key={t.id}
+                                        onClick={() => onSetTheme(t.id)}
+                                        className={`p-3 rounded-xl border transition-all flex flex-col items-center gap-2 ${currentTheme === t.id ? 'bg-indigo-50 border-indigo-500 ring-1 ring-indigo-500' : 'bg-slate-50 border-slate-100 hover:bg-white'}`}
+                                    >
+                                        <div className="w-8 h-8 rounded-full shadow-lg" style={{ backgroundColor: t.color }}></div>
+                                        <span className={`text-xs font-bold ${currentTheme === t.id ? 'text-indigo-900' : 'text-slate-500'}`}>{t.name}</span>
+                                    </button>
+                                ))}
                             </div>
                         </div>
                     </div>
