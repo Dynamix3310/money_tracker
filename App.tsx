@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment, where } from 'firebase/firestore';
-import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock, BellRing, ChevronDown } from 'lucide-react';
+import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock, BellRing, ChevronDown, Eye, EyeOff } from 'lucide-react';
 import { auth, db, getCollectionPath, getUserProfilePath } from './services/firebase';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
 import { ADMIN_EMAILS } from './services/gemini';
@@ -39,6 +39,8 @@ const safeDate = (dateObj: any) => {
 
 export default function App() {
    const [user, setUser] = useState<User | null>(null);
+   const [showNetWorth, setShowNetWorth] = useState(localStorage.getItem('show_net_worth') !== 'false');
+   const toggleNetWorth = () => { const newVal = !showNetWorth; setShowNetWorth(newVal); localStorage.setItem('show_net_worth', String(newVal)); };
    const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
    const [userGroups, setUserGroups] = useState<Group[]>([]);
    const [loading, setLoading] = useState(true);
@@ -423,7 +425,7 @@ export default function App() {
                   <select value={baseCurrency} onChange={e => setBaseCurrency(e.target.value)} className="bg-slate-800 rounded px-2 py-1 text-white text-xs outline-none border border-slate-700 focus:border-indigo-500">{ALLOWED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select>
                </div>
             </div>
-            <div className="px-6 py-5"><div className="text-slate-400 text-xs mb-1 flex items-center gap-1">總資產淨值 ({baseCurrency})</div><div className="text-3xl font-bold text-white tracking-tight">{CURRENCY_SYMBOLS[baseCurrency]} {Math.round(totalNetWorth).toLocaleString()}</div></div>
+            <div className="px-6 py-5"><div className="text-slate-400 text-xs mb-1 flex items-center gap-1">總資產淨值 ({baseCurrency}) <button onClick={toggleNetWorth} className="ml-1 text-slate-500 hover:text-slate-300 transition-colors">{showNetWorth ? <Eye size={12} /> : <EyeOff size={12} />}</button></div><div className="text-3xl font-bold text-white tracking-tight">{showNetWorth ? `${CURRENCY_SYMBOLS[baseCurrency]} ${Math.round(totalNetWorth).toLocaleString()}` : `****`}</div></div>
          </header>
          <main className="flex-1 overflow-y-auto pb-24 scroll-smooth bg-slate-50/50">
             <div className="max-w-2xl mx-auto p-4 space-y-6">
