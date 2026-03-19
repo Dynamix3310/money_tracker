@@ -296,11 +296,11 @@ export default function App() {
 
    // Auto Record Daily Net Worth
    useEffect(() => {
-      if (!user || totalNetWorth === 0 || historyData.length === 0) return;
+      if (!user || totalNetWorth === 0) return;
 
       const today = new Date().toISOString().split('T')[0];
-      const lastEntry = historyData[historyData.length - 1];
-      const lastDate = lastEntry.date?.seconds ? new Date(lastEntry.date.seconds * 1000).toISOString().split('T')[0] : '';
+      const lastEntry = historyData.length > 0 ? historyData[historyData.length - 1] : null;
+      const lastDate = lastEntry?.date?.seconds ? new Date(lastEntry.date.seconds * 1000).toISOString().split('T')[0] : '';
 
       if (lastDate !== today) {
          // Add new history entry
