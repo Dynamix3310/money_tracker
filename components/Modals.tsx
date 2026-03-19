@@ -361,7 +361,7 @@ export const PortfolioRebalanceModal = ({ holdings, platforms, rates, baseCurren
 };
 
 // --- AddTransactionModal (With Auto-Balancing) ---
-export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData, rates, convert }: any) => {
+export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData, rates, convert, accounts }: any) => {
     const [type, setType] = useState<'expense' | 'income'>(editData?.type || 'expense');
     const [amount, setAmount] = useState(editData?.sourceAmount?.toString() || editData?.totalAmount?.toString() || '');
     const [currency, setCurrency] = useState(editData?.sourceCurrency || editData?.currency || 'TWD');
@@ -376,6 +376,8 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     const [multiPayers, setMultiPayers] = useState<Record<string, string>>(editData && Object.keys(editData.payers).length > 1 ? Object.fromEntries(Object.entries(editData.payers).map(([k, v]: any) => [k, v.toString()])) : {});
     const [customSplits, setCustomSplits] = useState<Record<string, string>>(editData && editData.splitDetails ? Object.fromEntries(Object.entries(editData.splitDetails).map(([k, v]: any) => [k, v.toString()])) : {});
     const [loadingAI, setLoadingAI] = useState(false);
+    const [isFromBank, setIsFromBank] = useState(!!editData?.linkedBankAccountId);
+    const [selectedAccountId, setSelectedAccountId] = useState(editData?.linkedBankAccountId || (accounts?.length ? accounts[0].id : ''));
 
     useEffect(() => { if (editData) { if (Object.keys(editData.payers).length > 1) setPayerMode('multi'); const values: number[] = Object.values(editData.splitDetails); if (values.length > 0 && (Math.max(...values) - Math.min(...values) > 1)) setSplitMode('custom'); } }, []);
     const currentCats = useMemo(() => categories.filter((c: any) => c.type === type).sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [categories, type]);
@@ -444,10 +446,37 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
             }
         }
 
-        const data = { totalAmount: finalAmt, description, category, type, payers, splitDetails: splits, date: Timestamp.fromDate(new Date(date)), currency: 'TWD', sourceAmount: parseFloat(amount), sourceCurrency: currency, exchangeRate: currency === 'TWD' ? 1 : (finalAmt / parseFloat(amount)) };
+        const data: any = { totalAmount: finalAmt, description, category, type, payers, splitDetails: splits, date: Timestamp.fromDate(new Date(date)), currency: 'TWD', sourceAmount: parseFloat(amount), sourceCurrency: currency, exchangeRate: currency === 'TWD' ? 1 : (finalAmt / parseFloat(amount)), linkedBankAccountId: (isFromBank && selectedAccountId) ? selectedAccountId : null };
         const col = collection(db, getCollectionPath(userId, groupId, 'transactions'));
-        if (editData) await updateDoc(doc(col, editData.id), data);
-        else await addDoc(col, data);
+        let transId = editData?.id;
+        if (editData) {
+            await updateDoc(doc(col, editData.id), data);
+        } else {
+            const newDoc = await addDoc(col, data);
+            transId = newDoc.id;
+        }
+
+        if (isFromBank && selectedAccountId) {
+            const bankLogsCol = collection(db, getCollectionPath(userId, null, 'bankLogs'));
+            const bankAmount = parseFloat(amount) || 0;
+            const bankLogData = {
+                accountId: selectedAccountId,
+                type: type === 'expense' ? 'out' : 'in',
+                amount: bankAmount,
+                date: Timestamp.fromDate(new Date(date)),
+                description: description
+            };
+
+            if (editData?.linkedBankTransactionId) {
+                await updateDoc(doc(bankLogsCol, editData.linkedBankTransactionId), bankLogData);
+            } else {
+                const newBankLog = await addDoc(bankLogsCol, bankLogData);
+                await updateDoc(doc(col, transId), { linkedBankTransactionId: newBankLog.id });
+            }
+        } else if (!isFromBank && editData?.linkedBankTransactionId) {
+            await deleteDoc(doc(db, getCollectionPath(userId, null, 'bankLogs'), editData.linkedBankTransactionId));
+            await updateDoc(doc(col, transId), { linkedBankTransactionId: null });
+        }
 
         if (isRecurring && !editData) {
             const nm = new Date(date); nm.setMonth(nm.getMonth() + 1);
@@ -467,6 +496,17 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                 {type === 'expense' && people.length > 1 && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>分帳</label><div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setSplitMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'single' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>單人</button><button onClick={() => setSplitMode('custom')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'custom' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>自訂</button><button onClick={() => setSplitMode('equal')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'equal' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>平分</button></div></div>{splitMode === 'equal' ? (<div className="text-center text-xs text-slate-500 py-2">每人約 <span className="font-bold text-indigo-600">${(finalAmt / people.length).toFixed(1)}</span></div>) : splitMode === 'single' ? (<select className={styles.input} value={singleSplitPayerId || people[0]?.id} onChange={e => setSingleSplitPayerId(e.target.value)}>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={customSplits[p.id] || ''} onChange={e => handleSplitChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, customSplits, setCustomSplits)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>)}
                 <div><label className={styles.label}>說明</label><input className={styles.input} value={description} onChange={e => setDescription(e.target.value)} /></div>
                 <div className="grid grid-cols-2 gap-3"><div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e => setDate(e.target.value)} /></div><div><label className={styles.label}>分類</label><select className={styles.input} value={category} onChange={e => setCategory(e.target.value)}>{currentCats.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div></div>
+                {accounts && accounts.length > 0 && (
+                    <div className="flex items-center gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                        <input type="checkbox" id="isFromBank" checked={isFromBank} onChange={e => setIsFromBank(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded" />
+                        <label htmlFor="isFromBank" className="text-sm font-bold text-slate-700">同步至銀行帳戶 ({type === 'expense' ? '扣款' : '入帳'})</label>
+                        {isFromBank && (
+                            <select className={`${styles.input} ml-auto w-auto py-1.5 min-w-[120px] text-sm font-bold bg-white shadow-sm ring-1 ring-slate-200`} value={selectedAccountId} onChange={e => setSelectedAccountId(e.target.value)}>
+                                {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                            </select>
+                        )}
+                    </div>
+                )}
                 {!editData && (<div className="flex items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100"><input type="checkbox" id="recurring" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded" /><label htmlFor="recurring" className="text-sm font-bold text-indigo-700 flex items-center gap-2"><Repeat size={16} /> 固定收支</label></div>)}
                 <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div>
             </div>

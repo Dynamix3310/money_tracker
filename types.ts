@@ -77,6 +77,8 @@ export interface Transaction {
   payers: Record<string, number>;
   splitDetails: Record<string, number>;
   isRecurring?: boolean;
+  linkedBankAccountId?: string;
+  linkedBankTransactionId?: string;
 }
 
 export interface Person {
