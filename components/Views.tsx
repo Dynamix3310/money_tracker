@@ -124,7 +124,8 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
         const groups: Record<string, any[]> = {};
         filtered.forEach((t: any) => {
             const d = t.date?.seconds ? new Date(t.date.seconds * 1000) : new Date();
-            const key = `${d.getFullYear()}年${d.getMonth() + 1}月`;
+            const days = ['日', '一', '二', '三', '四', '五', '六'];
+            const key = `${d.getFullYear()}年${String(d.getMonth() + 1).padStart(2, '0')}月${String(d.getDate()).padStart(2, '0')}日 (星期${days[d.getDay()]})`;
             if (!groups[key]) groups[key] = [];
             groups[key].push(t);
         });
@@ -232,9 +233,15 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
 
             {viewMode === 'list' && (
                 <div className="space-y-4">
-                    {Object.keys(groupedTransactions).length === 0 ? <div className="text-center py-12 text-slate-400 text-sm">無紀錄</div> : Object.entries(groupedTransactions).map(([month, list]) => (
-                        <div key={month}>
-                            <div className="text-xs font-bold text-slate-400 mb-2 ml-1">{month}</div>
+                    {Object.keys(groupedTransactions).length === 0 ? <div className="text-center py-12 text-slate-400 text-sm">無紀錄</div> : Object.keys(groupedTransactions).sort((a, b) => {
+                        const timeA = groupedTransactions[a][0]?.date?.seconds || 0;
+                        const timeB = groupedTransactions[b][0]?.date?.seconds || 0;
+                        return timeB - timeA;
+                    }).map(dayKey => {
+                        const list = groupedTransactions[dayKey];
+                        return (
+                        <div key={dayKey}>
+                            <div className="text-xs font-bold text-slate-400 mb-2 ml-1">{dayKey}</div>
                             <div className="space-y-2">
                                 {(list as any[]).map((t: any) => {
                                     const myShare = myPersonId && t.type === 'expense' ? t.splitDetails?.[myPersonId] : 0;
@@ -245,7 +252,7 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
                                                     {t.category?.[0]}
                                                     {linkedIds.has(t.id) && <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 border shadow-sm"><Link2 size={10} className="text-indigo-600" /></div>}
                                                 </div>
-                                                <div><div className="font-bold text-slate-800 text-sm">{t.description}</div><div className="text-[10px] text-slate-400">{t.date?.seconds ? new Date(t.date.seconds * 1000).toLocaleDateString() : ''} • {t.category} {t.isRecurring && '(自動)'}</div></div>
+                                                <div><div className="font-bold text-slate-800 text-sm">{t.description}</div><div className="text-[10px] text-slate-400">{t.date?.seconds ? new Date(t.date.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''} • {t.category} {t.isRecurring && '(自動)'}</div></div>
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 <div className="text-right">
@@ -281,7 +288,7 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
                                 })}
                             </div>
                         </div>
-                    ))}
+                    );})}
                 </div>
             )}
 
