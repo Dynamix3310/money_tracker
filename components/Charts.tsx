@@ -67,6 +67,7 @@ export const NetWorthAreaChart = ({ data }: { data: { label: string, value: numb
              <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
            </linearGradient>
          </defs>
+         <YAxis domain={['auto', 'auto']} hide />
          <Area type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorValue)" />
          <Tooltip contentStyle={{display: 'none'}} />
        </AreaChart>

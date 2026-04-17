@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal, FileSpreadsheet, Coins, Scale } from 'lucide-react';
 import { AssetHolding, Transaction, BankAccount, CreditCardInfo, Person, BankTransaction, CreditCardLog, Platform } from '../types';
 import { ExpensePieChart } from './Charts';
@@ -59,6 +59,19 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
     const [customStart, setCustomStart] = useState(new Date().toISOString().split('T')[0]);
     const [customEnd, setCustomEnd] = useState(new Date().toISOString().split('T')[0]);
     const [statsFilter, setStatsFilter] = useState<string>('all'); // 'all' or personId
+
+    const [displayLimit, setDisplayLimit] = useState(50);
+    const observerTarget = useRef(null);
+
+    useEffect(() => {
+        const observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting) {
+                setDisplayLimit(prev => prev + 50);
+            }
+        }, { threshold: 0.1 });
+        if (observerTarget.current) observer.observe(observerTarget.current);
+        return () => observer.disconnect();
+    }, [viewMode]);
 
     const linkedIds = useMemo(() => new Set(cardLogs.filter((c: any) => c.isReconciled && c.linkedTransactionId).map((c: any) => c.linkedTransactionId)), [cardLogs]);
 
@@ -122,7 +135,8 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
 
     const groupedTransactions = useMemo(() => {
         const groups: Record<string, any[]> = {};
-        filtered.forEach((t: any) => {
+        const listItems = filtered.slice(0, displayLimit);
+        listItems.forEach((t: any) => {
             const d = t.date?.seconds ? new Date(t.date.seconds * 1000) : new Date();
             const days = ['日', '一', '二', '三', '四', '五', '六'];
             const key = `${d.getFullYear()}年${String(d.getMonth() + 1).padStart(2, '0')}月${String(d.getDate()).padStart(2, '0')}日 (星期${days[d.getDay()]})`;
@@ -130,7 +144,7 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
             groups[key].push(t);
         });
         return groups;
-    }, [filtered, viewMode]);
+    }, [filtered, viewMode, displayLimit]);
 
     const debtData = useMemo(() => {
         const balances: Record<string, number> = {};
@@ -289,6 +303,11 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
                             </div>
                         </div>
                     );})}
+                    {viewMode === 'list' && (
+                        <div ref={observerTarget} className="h-10 w-full flex items-center justify-center">
+                            {displayLimit < filtered.length && <div className="text-slate-400 text-xs">載入更多...</div>}
+                        </div>
+                    )}
                 </div>
             )}
 
