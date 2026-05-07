@@ -119,19 +119,21 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
         return { start, end };
     };
 
-    const { start: filterStart, end: filterEnd } = getDateRange();
+    const { start: filterStart, end: filterEnd } = useMemo(getDateRange, [timeRange, customStart, customEnd]);
 
-    const filtered = transactions.filter((t: any) => {
-        const matchSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase()) || t.category.includes(searchTerm);
+    const filtered = useMemo(() => {
+        return transactions.filter((t: any) => {
+            const matchSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase()) || t.category.includes(searchTerm);
 
-        if (viewMode === 'stats') {
-            if (!t.date?.seconds) return false;
-            const d = new Date(t.date.seconds * 1000);
-            return d >= filterStart && d <= filterEnd;
-        }
+            if (viewMode === 'stats') {
+                if (!t.date?.seconds) return false;
+                const d = new Date(t.date.seconds * 1000);
+                return d >= filterStart && d <= filterEnd;
+            }
 
-        return matchSearch;
-    }).sort((a: any, b: any) => (b.date?.seconds || 0) - (a.date?.seconds || 0));
+            return matchSearch;
+        }).sort((a: any, b: any) => (b.date?.seconds || 0) - (a.date?.seconds || 0));
+    }, [transactions, searchTerm, viewMode, filterStart, filterEnd]);
 
     const groupedTransactions = useMemo(() => {
         const groups: Record<string, any[]> = {};
