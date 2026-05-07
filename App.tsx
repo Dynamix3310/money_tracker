@@ -419,16 +419,41 @@ export default function App() {
    return (
       <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden relative">
          {notification && <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/90 text-white px-4 py-2 rounded-full shadow-xl text-sm font-bold flex items-center gap-2 animate-in slide-in-from-top-2 fade-in"><BellRing size={16} className="text-indigo-400" /> {notification}</div>}
-         <header className="bg-slate-900 text-white pb-2 pt-safe z-20 shadow-md">
-            <div className="px-4 pt-4 pb-2 flex justify-between items-center border-b border-slate-800/50"><div className="flex items-center gap-2.5 text-white"><div className="bg-indigo-600 p-1.5 rounded-lg shadow-lg shadow-indigo-500/30"><Wallet size={18} className="text-white" /></div><span className="font-bold text-lg tracking-tight">WealthFlow</span></div><button onClick={() => setActiveModal('settings')} className="text-slate-400 hover:text-white transition-colors p-1 rounded-full hover:bg-slate-800"><Settings size={20} /></button></div>
-            <div className="px-4 py-2 flex justify-between items-center text-xs text-slate-400 border-b border-slate-800">
-               <div className="flex items-center gap-2 w-full">
-                  <div className="relative max-w-[60%]"><select value={currentGroupId || ''} onChange={(e) => handleSwitchGroup(e.target.value)} className="appearance-none bg-slate-800 border border-slate-700 text-white py-1 pl-3 pr-8 rounded-lg text-xs font-bold outline-none w-full truncate focus:border-indigo-500 transition-colors">{userGroups.map(g => (<option key={g.id} value={g.id}>{g.name} {g.id === user.uid ? '(個人)' : ''}</option>))}</select><ChevronDown size={12} className="absolute right-2 top-1.5 text-slate-400 pointer-events-none" /></div>
-                  <div className="flex-1"></div>
-                  <select value={baseCurrency} onChange={e => setBaseCurrency(e.target.value)} className="bg-slate-800 rounded px-2 py-1 text-white text-xs outline-none border border-slate-700 focus:border-indigo-500">{ALLOWED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select>
+         <header className="bg-slate-900 text-white pb-3 pt-safe z-20 shadow-md relative">
+            <div className="px-4 py-3 flex justify-between items-center gap-3">
+               <div className="flex items-center gap-2 text-white">
+                  <div className="bg-indigo-600 p-1.5 rounded-lg shadow-lg shadow-indigo-500/30"><Wallet size={16} className="text-white" /></div>
+               </div>
+               
+               <div className="relative flex-1 max-w-[180px]">
+                  <select value={currentGroupId || ''} onChange={(e) => handleSwitchGroup(e.target.value)} className="appearance-none bg-slate-800 border border-slate-700 text-white py-1.5 pl-3 pr-8 rounded-lg text-xs font-bold outline-none w-full truncate focus:border-indigo-500 transition-colors text-center">
+                     {userGroups.map(g => (<option key={g.id} value={g.id}>{g.name} {g.id === user.uid ? '(個人)' : ''}</option>))}
+                  </select>
+                  <ChevronDown size={12} className="absolute right-3 top-2.5 text-slate-400 pointer-events-none" />
+               </div>
+
+               <div className="flex items-center gap-2">
+                  <div className="relative">
+                     <select value={baseCurrency} onChange={e => setBaseCurrency(e.target.value)} className="appearance-none bg-slate-800 rounded-lg pl-2 pr-6 py-1.5 text-white text-xs outline-none border border-slate-700 focus:border-indigo-500 font-bold min-w-[55px]">
+                        {ALLOWED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                     </select>
+                     <ChevronDown size={10} className="absolute right-2 top-2.5 text-slate-400 pointer-events-none" />
+                  </div>
+                  <button onClick={() => setActiveModal('settings')} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-full hover:bg-slate-800"><Settings size={18} /></button>
                </div>
             </div>
-            <div className="px-6 py-5"><div className="text-slate-400 text-xs mb-1 flex items-center gap-1">總資產淨值 ({baseCurrency}) <button onClick={toggleNetWorth} className="ml-1 text-slate-500 hover:text-slate-300 transition-colors">{showNetWorth ? <Eye size={12} /> : <EyeOff size={12} />}</button></div><div className="text-3xl font-bold text-white tracking-tight">{showNetWorth ? `${CURRENCY_SYMBOLS[baseCurrency]} ${Math.round(totalNetWorth).toLocaleString()}` : `****`}</div></div>
+
+            <div className="px-4 flex justify-between items-center bg-slate-800/40 mx-4 py-2.5 rounded-xl border border-slate-700/50">
+               <div className="text-slate-400 text-xs flex items-center gap-2 font-bold">
+                  總資產淨值 
+                  <button onClick={toggleNetWorth} className="text-slate-500 hover:text-slate-300 transition-colors">
+                     {showNetWorth ? <Eye size={14} /> : <EyeOff size={14} />}
+                  </button>
+               </div>
+               <div className="text-xl font-bold text-white tracking-tight">
+                  {showNetWorth ? `${CURRENCY_SYMBOLS[baseCurrency]} ${Math.round(totalNetWorth).toLocaleString()}` : `****`}
+               </div>
+            </div>
          </header>
          <main className="flex-1 overflow-y-auto pb-24 scroll-smooth bg-slate-50/50">
             <div className="max-w-2xl mx-auto p-4 space-y-6">
