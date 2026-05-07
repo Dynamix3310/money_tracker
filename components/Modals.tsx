@@ -1457,6 +1457,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                    RETURN ONLY RAW JSON. NO DESCRIPTION. NO MARKDOWN.
                    - description: Seller Name or Item Name
                    - amount: Number (FIND THE TOTAL/FINAL AMOUNT. Remove currency symbols, handle commas)
+                   - currency: string (If currency is obvious like $, USD, ¥, JPY, NT$, TWD, return standard code: 'TWD', 'USD', 'JPY'. Default to 'TWD')
                    - date: YYYY-MM-DD (If missing year, use current year ${new Date().getFullYear()})
                    - type: 'expense' (default) or 'income' (if strictly implies income)
                    - category: Choose closest match from [${categories.map((c: any) => c.name).join(', ')}] based on seller/item.
@@ -1523,6 +1524,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
 
                 return {
                     ...it,
+                    currency: it.currency || 'TWD',
                     id: Math.random().toString(36).substr(2, 9),
                     selected: !isDup && !isAnomaly,
                     isDuplicate: isDup,
@@ -1554,7 +1556,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                         category: item.category || '未分類',
                         type: item.type || 'expense',
                         date: Timestamp.fromDate(new Date(item.date)),
-                        currency: 'TWD',
+                        currency: item.currency || 'TWD',
                         payers: { [payerId]: item.amount },
                         splitDetails: { [payerId]: item.amount }
                     }));
@@ -1686,7 +1688,22 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                     <div className="space-y-4">
                         <div className="flex justify-between items-center">
                             <div className="text-sm text-slate-500">解析結果 ({parsedItems.length} 筆)</div>
-                            <button onClick={() => setParsedItems([])} className="text-sm text-indigo-600 font-bold">重新上傳</button>
+                            <div className="flex gap-3 items-center">
+                                {target === 'ledger' && (
+                                    <select onChange={(e) => {
+                                        if (e.target.value) {
+                                            setParsedItems(parsedItems.map(p => ({...p, currency: e.target.value})));
+                                            e.target.value = ""; // Reset after selection
+                                        }
+                                    }} className="text-xs bg-slate-100 text-slate-600 border border-slate-200 rounded p-1 outline-none">
+                                        <option value="">批次套用幣別...</option>
+                                        <option value="TWD">全部套用 TWD</option>
+                                        <option value="USD">全部套用 USD</option>
+                                        <option value="JPY">全部套用 JPY</option>
+                                    </select>
+                                )}
+                                <button onClick={() => setParsedItems([])} className="text-sm text-indigo-600 font-bold hover:text-indigo-800 transition-colors">重新上傳</button>
+                            </div>
                         </div>
                         <div className="max-h-[50vh] overflow-y-auto space-y-2">
                             {parsedItems.map((item, idx) => (
@@ -1705,8 +1722,9 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                                         </div>
                                         <div className="flex gap-2 mt-1">
                                             <input type="date" value={item.date} onChange={e => { const n = [...parsedItems]; n[idx].date = e.target.value; setParsedItems(n) }} className="text-xs text-slate-400 bg-transparent" />
-                                            {target === 'ledger' && (<select value={item.category} onChange={e => { const n = [...parsedItems]; n[idx].category = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{categories.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select>)}
+                                            {target === 'ledger' && (<select value={item.category} onChange={e => { const n = [...parsedItems]; n[idx].category = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1 max-w-[80px]">{categories.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select>)}
                                             {(target === 'bank' || target === 'ledger') && (<select value={item.type} onChange={e => { const n = [...parsedItems]; n[idx].type = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{target === 'ledger' ? <><option value="expense">支出</option><option value="income">收入</option></> : <><option value="out">支出</option><option value="in">收入</option></>}</select>)}
+                                            {target === 'ledger' && (<select value={item.currency || 'TWD'} onChange={e => { const n = [...parsedItems]; n[idx].currency = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1"><option value="TWD">TWD</option><option value="USD">USD</option><option value="JPY">JPY</option></select>)}
                                         </div>
                                     </div>
                                     <button onClick={() => { setParsedItems(parsedItems.filter((_, i) => i !== idx)) }} className="text-slate-300 hover:text-red-500"><Trash2 size={16} /></button>
