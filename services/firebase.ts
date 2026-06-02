@@ -1,7 +1,7 @@
 
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 
 // Augment ImportMeta to fix TS error regarding 'env' property
 declare global {
@@ -35,6 +35,9 @@ if (firebaseConfig.apiKey) {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
+    enableIndexedDbPersistence(db).catch((err) => {
+        console.warn("Persistence error:", err);
+    });
   } catch (error) {
     console.error("Firebase Initialization Error:", error);
   }
