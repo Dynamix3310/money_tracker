@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment, where } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment, where, limit } from 'firebase/firestore';
 import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock, BellRing, ChevronDown, Eye, EyeOff } from 'lucide-react';
 import { auth, db, getCollectionPath, getUserProfilePath } from './services/firebase';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
@@ -269,13 +269,18 @@ export default function App() {
       if (currentGroupId) {
          const groupId = currentGroupId;
          const groupCols = ['transactions', 'people', 'categories', 'recurring'];
-         groupUnsubs = groupCols.map(c => onSnapshot(collection(db, getCollectionPath(user.uid, groupId, c)), s => {
-            const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-            if (c === 'transactions') setTransactions(data as Transaction[]);
-            if (c === 'people') setPeople(data as Person[]);
-            if (c === 'categories') setCategories(data as Category[]);
-            if (c === 'recurring') setRecurringRules(data as RecurringRule[]);
-         }));
+         groupUnsubs = groupCols.map(c => {
+            const colRef = collection(db, getCollectionPath(user.uid, groupId, c));
+            const q = c === 'transactions' ? query(colRef, orderBy('date', 'desc'), limit(500)) : colRef;
+            
+            return onSnapshot(q, s => {
+               const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+               if (c === 'transactions') setTransactions(data as Transaction[]);
+               if (c === 'people') setPeople(data as Person[]);
+               if (c === 'categories') setCategories(data as Category[]);
+               if (c === 'recurring') setRecurringRules(data as RecurringRule[]);
+            });
+         });
       }
       return () => { [...privateUnsubs, ...groupUnsubs].forEach(u => u()); };
    }, [user, currentGroupId]);
