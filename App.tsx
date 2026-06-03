@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment, where, limit } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment, where } from 'firebase/firestore';
 import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock, BellRing, ChevronDown, Eye, EyeOff } from 'lucide-react';
 import { auth, db, getCollectionPath, getUserProfilePath } from './services/firebase';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
@@ -269,18 +269,13 @@ export default function App() {
       if (currentGroupId) {
          const groupId = currentGroupId;
          const groupCols = ['transactions', 'people', 'categories', 'recurring'];
-         groupUnsubs = groupCols.map(c => {
-            const colRef = collection(db, getCollectionPath(user.uid, groupId, c));
-            const q = c === 'transactions' ? query(colRef, orderBy('date', 'desc'), limit(500)) : colRef;
-            
-            return onSnapshot(q, s => {
-               const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-               if (c === 'transactions') setTransactions(data as Transaction[]);
-               if (c === 'people') setPeople(data as Person[]);
-               if (c === 'categories') setCategories(data as Category[]);
-               if (c === 'recurring') setRecurringRules(data as RecurringRule[]);
-            });
-         });
+         groupUnsubs = groupCols.map(c => onSnapshot(collection(db, getCollectionPath(user.uid, groupId, c)), s => {
+            const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+            if (c === 'transactions') setTransactions(data as Transaction[]);
+            if (c === 'people') setPeople(data as Person[]);
+            if (c === 'categories') setCategories(data as Category[]);
+            if (c === 'recurring') setRecurringRules(data as RecurringRule[]);
+         }));
       }
       return () => { [...privateUnsubs, ...groupUnsubs].forEach(u => u()); };
    }, [user, currentGroupId]);
@@ -429,7 +424,7 @@ export default function App() {
                <div className="flex items-center gap-2 text-white">
                   <div className="bg-indigo-600 p-1.5 rounded-lg shadow-lg shadow-indigo-500/30"><Wallet size={16} className="text-white" /></div>
                </div>
-               
+
                <div className="relative flex-1 max-w-[180px]">
                   <select value={currentGroupId || ''} onChange={(e) => handleSwitchGroup(e.target.value)} className="appearance-none bg-slate-800 border border-slate-700 text-white py-1.5 pl-3 pr-8 rounded-lg text-xs font-bold outline-none w-full truncate focus:border-indigo-500 transition-colors text-center">
                      {userGroups.map(g => (<option key={g.id} value={g.id}>{g.name} {g.id === user.uid ? '(個人)' : ''}</option>))}
@@ -450,7 +445,7 @@ export default function App() {
 
             <div className="px-4 flex justify-between items-center bg-slate-800/40 mx-4 py-2.5 rounded-xl border border-slate-700/50">
                <div className="text-slate-400 text-xs flex items-center gap-2 font-bold">
-                  總資產淨值 
+                  總資產淨值
                   <button onClick={toggleNetWorth} className="text-slate-500 hover:text-slate-300 transition-colors">
                      {showNetWorth ? <Eye size={14} /> : <EyeOff size={14} />}
                   </button>
