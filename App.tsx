@@ -41,7 +41,7 @@ export default function App() {
    const [user, setUser] = useState<User | null>(null);
    const [showNetWorth, setShowNetWorth] = useState(localStorage.getItem('show_net_worth') !== 'false');
    const toggleNetWorth = () => { const newVal = !showNetWorth; setShowNetWorth(newVal); localStorage.setItem('show_net_worth', String(newVal)); };
-   const [currentGroupId, setCurrentGroupId] = useState<string | null>(null);
+   const [currentGroupId, setCurrentGroupId] = useState<string | null>(() => localStorage.getItem('cached_groupId') || null);
    const [userGroups, setUserGroups] = useState<Group[]>([]);
    const [loading, setLoading] = useState(true);
    const [notification, setNotification] = useState<string | null>(null);
@@ -81,8 +81,12 @@ export default function App() {
    const [cardLogs, setCardLogs] = useState<CreditCardLog[]>([]);
    const [historyData, setHistoryData] = useState<NetWorthHistory[]>([]);
    const [transactions, setTransactions] = useState<Transaction[]>([]);
-   const [people, setPeople] = useState<Person[]>([]);
-   const [categories, setCategories] = useState<Category[]>([]);
+   const [people, setPeople] = useState<Person[]>(() => {
+      try { const c = localStorage.getItem('cached_people'); return c ? JSON.parse(c) : []; } catch { return []; }
+   });
+   const [categories, setCategories] = useState<Category[]>(() => {
+      try { const c = localStorage.getItem('cached_categories'); return c ? JSON.parse(c) : []; } catch { return []; }
+   });
    const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
 
    // Ref for background process
@@ -124,14 +128,21 @@ export default function App() {
    // Listen to User Profile and Groups
    useEffect(() => {
       if (!user || !db) return;
+      // If no cached groupId, default to user.uid immediately so collections can start loading
+      if (!currentGroupId) {
+         setCurrentGroupId(user.uid);
+         localStorage.setItem('cached_groupId', user.uid);
+      }
       const unsubProfile = onSnapshot(doc(db, getUserProfilePath(user.uid)), (docSnap) => {
          if (docSnap.exists()) {
             const data = docSnap.data();
             if (data.currentGroupId) {
                setCurrentGroupId(data.currentGroupId);
+               localStorage.setItem('cached_groupId', data.currentGroupId);
             }
          } else {
             setCurrentGroupId(user.uid);
+            localStorage.setItem('cached_groupId', user.uid);
          }
       });
 
@@ -253,19 +264,9 @@ export default function App() {
       }
    };
 
-   // Sync Data (with dataReady tracking for progressive UI)
+   // Sync Private Data (always starts immediately after auth, no dependency on groupId)
    useEffect(() => {
       if (!user || !db) return;
-      setDataReady(false);
-      const readyFlags: Record<string, boolean> = {};
-      const markReady = (key: string) => {
-         readyFlags[key] = true;
-         // Consider data ready once core collections have responded
-         if (readyFlags['transactions'] || readyFlags['categories']) {
-            setDataReady(true);
-         }
-      };
-
       const privateCols = ['platforms', 'holdings', 'accounts', 'bankLogs', 'creditCards', 'cardLogs', 'history'];
       const privateUnsubs = privateCols.map(c => onSnapshot(c === 'history' ? query(collection(db, getCollectionPath(user.uid, null, c)), orderBy('date', 'asc')) : collection(db, getCollectionPath(user.uid, null, c)), s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -276,26 +277,33 @@ export default function App() {
          if (c === 'creditCards') setCreditCards(data as CreditCardInfo[]);
          if (c === 'cardLogs') setCardLogs(data as CreditCardLog[]);
          if (c === 'history') setHistoryData(data as NetWorthHistory[]);
-         markReady(c);
       }));
+      return () => { privateUnsubs.forEach(u => u()); };
+   }, [user]);
 
-      let groupUnsubs: any[] = [];
-      if (currentGroupId) {
-         const groupId = currentGroupId;
-         const groupCols = ['transactions', 'people', 'categories', 'recurring'];
-         groupUnsubs = groupCols.map(c => onSnapshot(collection(db, getCollectionPath(user.uid, groupId, c)), s => {
-            const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-            if (c === 'transactions') setTransactions(data as Transaction[]);
-            if (c === 'people') setPeople(data as Person[]);
-            if (c === 'categories') setCategories(data as Category[]);
-            if (c === 'recurring') setRecurringRules(data as RecurringRule[]);
-            markReady(c);
-         }));
-      } else {
-         // No group → mark group data as ready immediately
-         setDataReady(true);
-      }
-      return () => { [...privateUnsubs, ...groupUnsubs].forEach(u => u()); };
+   // Sync Group Data (depends on currentGroupId, with localStorage caching for people/categories)
+   useEffect(() => {
+      if (!user || !db || !currentGroupId) return;
+      setDataReady(false);
+      let firstResponse = false;
+
+      const groupId = currentGroupId;
+      const groupCols = ['transactions', 'people', 'categories', 'recurring'];
+      const groupUnsubs = groupCols.map(c => onSnapshot(collection(db, getCollectionPath(user.uid, groupId, c)), s => {
+         const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+         if (c === 'transactions') setTransactions(data as Transaction[]);
+         if (c === 'people') {
+            setPeople(data as Person[]);
+            try { localStorage.setItem('cached_people', JSON.stringify(data)); } catch {}
+         }
+         if (c === 'categories') {
+            setCategories(data as Category[]);
+            try { localStorage.setItem('cached_categories', JSON.stringify(data)); } catch {}
+         }
+         if (c === 'recurring') setRecurringRules(data as RecurringRule[]);
+         if (!firstResponse) { firstResponse = true; setDataReady(true); }
+      }));
+      return () => { groupUnsubs.forEach(u => u()); };
    }, [user, currentGroupId]);
 
    const calculatedAccounts = useMemo(() => accounts.map(acc => {
@@ -494,9 +502,11 @@ export default function App() {
                            <div className="h-32 bg-slate-50 rounded-xl animate-pulse mt-4"></div>
                         </div>
                      </div>
-                     <button onClick={() => setActiveModal('add-trans')} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold text-base flex items-center justify-center gap-2 shadow-lg hover:bg-indigo-700 active:scale-[0.98] transition-all">
-                        <Plus size={20} /> 立即記一筆
-                     </button>
+                     {user && currentGroupId && people.length > 0 && (
+                        <button onClick={() => setActiveModal('add-trans')} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold text-base flex items-center justify-center gap-2 shadow-lg hover:bg-indigo-700 active:scale-[0.98] transition-all">
+                           <Plus size={20} /> 立即記一筆
+                        </button>
+                     )}
                   </div>
                )}
                {dataReady && activeTab === 'home' && (
