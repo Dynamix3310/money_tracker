@@ -252,7 +252,11 @@ export default function App() {
    useEffect(() => {
       if (!activeUid || !db) return;
       const privateCols = ['platforms', 'holdings', 'accounts', 'bankLogs', 'creditCards', 'cardLogs', 'history'];
-      const privateUnsubs = privateCols.map(c => onSnapshot(c === 'history' ? query(collection(db, getCollectionPath(activeUid, null, c)), orderBy('date', 'asc')) : collection(db, getCollectionPath(activeUid, null, c)), s => {
+      const privateUnsubs = privateCols.map(c => {
+         let q = collection(db, getCollectionPath(activeUid, null, c)) as any;
+         if (c === 'history') q = query(q, orderBy('date', 'asc'));
+         if (c === 'bankLogs' || c === 'cardLogs') q = query(q, orderBy('date', 'desc'));
+         return onSnapshot(q, s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
          if (c === 'platforms') setPlatforms(data as Platform[]);
          if (c === 'holdings') setHoldings(data as AssetHolding[]);
@@ -261,7 +265,8 @@ export default function App() {
          if (c === 'creditCards') setCreditCards(data as CreditCardInfo[]);
          if (c === 'cardLogs') setCardLogs(data as CreditCardLog[]);
          if (c === 'history') setHistoryData(data as NetWorthHistory[]);
-      }));
+         });
+      });
       return () => { privateUnsubs.forEach(u => u()); };
    }, [activeUid]);
 
@@ -271,7 +276,7 @@ export default function App() {
       let firstResponse = false;
 
       const groupCols = ['transactions', 'people', 'categories', 'recurring'];
-      const groupUnsubs = groupCols.map(c => onSnapshot(collection(db, getCollectionPath(activeUid, currentGroupId, c)), s => {
+      const groupUnsubs = groupCols.map(c => onSnapshot(c === 'transactions' ? query(collection(db, getCollectionPath(activeUid, currentGroupId, c)), orderBy('date', 'desc')) : collection(db, getCollectionPath(activeUid, currentGroupId, c)), s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
          if (c === 'transactions') setTransactions(data as Transaction[]);
          if (c === 'people') {

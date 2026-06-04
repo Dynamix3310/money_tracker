@@ -447,7 +447,10 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
             }
         }
 
-        const data: any = { totalAmount: finalAmt, description, category, type, payers, splitDetails: splits, date: Timestamp.fromDate(new Date(date)), currency: 'TWD', sourceAmount: parseFloat(amount), sourceCurrency: currency, exchangeRate: currency === 'TWD' ? 1 : (finalAmt / parseFloat(amount)), linkedBankAccountId: (isFromBank && selectedAccountId) ? selectedAccountId : null };
+        onClose(); // Close modal immediately for instant UI response
+
+        try {
+            const data: any = { totalAmount: finalAmt, description, category, type, payers, splitDetails: splits, date: Timestamp.fromDate(new Date(date)), currency: 'TWD', sourceAmount: parseFloat(amount), sourceCurrency: currency, exchangeRate: currency === 'TWD' ? 1 : (finalAmt / parseFloat(amount)), linkedBankAccountId: (isFromBank && selectedAccountId) ? selectedAccountId : null };
         const col = collection(db, getCollectionPath(userId, groupId, 'transactions'));
         let transId = editData?.id;
         if (editData) {
@@ -483,7 +486,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
             const nm = new Date(date); nm.setMonth(nm.getMonth() + 1);
             await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), { name: description, amount: finalAmt, type, category, payerId: mainPayerId, payers, splitDetails: splits, frequency: 'monthly', active: true, nextDate: Timestamp.fromDate(nm) });
         }
-        onClose();
+        } catch (e) { console.error("Save failed", e); alert("儲存失敗，請重試"); }
     };
 
     return (
@@ -1200,7 +1203,7 @@ export const BankDetailModal = ({ userId, account, logs, onClose, onImport }: an
         const a = document.createElement('a'); a.href = url; a.download = `${account.name}_logs.csv`; a.click();
     };
 
-    const groupedLogs = logs.sort((a: any, b: any) => (Number(b.date?.seconds) || 0) - (Number(a.date?.seconds) || 0)).reduce((acc: any, log: any) => {
+    const groupedLogs = logs.reduce((acc: any, log: any) => {
         const d = log.date?.seconds ? new Date(Number(log.date.seconds) * 1000) : new Date();
         const key = `${d.getFullYear()}年${d.getMonth() + 1}月`;
         if (!acc[key]) acc[key] = [];
@@ -1314,7 +1317,7 @@ export const CardDetailModal = ({ userId, card, cardLogs, allCardLogs, transacti
         if (!l.date?.seconds) return false;
         const d = new Date(Number(l.date.seconds) * 1000);
         return d.getTime() >= currentCycleStart.getTime() && d.getTime() <= currentCycleEnd.getTime();
-    }).sort((a: any, b: any) => (Number(b.date?.seconds) || 0) - (Number(a.date?.seconds) || 0));
+    });
     const handleSaveLog = async () => {
         if (!amt || !desc) return;
         const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));

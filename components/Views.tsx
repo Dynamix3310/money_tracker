@@ -132,7 +132,7 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
             }
 
             return matchSearch;
-        }).sort((a: any, b: any) => (b.date?.seconds || 0) - (a.date?.seconds || 0));
+        });
     }, [transactions, searchTerm, viewMode, filterStart, filterEnd]);
 
     const groupedTransactions = useMemo(() => {
