@@ -21,6 +21,7 @@ export const ExpensePieChart = ({ data }: { data: { name: string, value: number 
           fill="#8884d8"
           paddingAngle={2}
           dataKey="value"
+          isAnimationActive={false}
         >
           {data.map((entry, index) => (
             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -48,8 +49,8 @@ export const CashFlowBarChart = ({ data }: { data: any[] }) => {
            contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}
         />
         <Legend iconType="circle" wrapperStyle={{fontSize: '12px', paddingTop: '10px'}}/>
-        <Bar dataKey="income" name="收入" fill="#10b981" radius={[4, 4, 0, 0]} barSize={12} />
-        <Bar dataKey="expense" name="支出" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={12} />
+        <Bar dataKey="income" name="收入" fill="#10b981" radius={[4, 4, 0, 0]} barSize={12} isAnimationActive={false} />
+        <Bar dataKey="expense" name="支出" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={12} isAnimationActive={false} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -68,7 +69,7 @@ export const NetWorthAreaChart = ({ data }: { data: { label: string, value: numb
            </linearGradient>
          </defs>
          <YAxis domain={['auto', 'auto']} hide />
-         <Area type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorValue)" />
+         <Area type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorValue)" isAnimationActive={false} />
          <Tooltip contentStyle={{display: 'none'}} />
        </AreaChart>
      </ResponsiveContainer>

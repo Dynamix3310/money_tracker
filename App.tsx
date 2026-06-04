@@ -39,6 +39,7 @@ const safeDate = (dateObj: any) => {
 
 export default function App() {
    const [user, setUser] = useState<User | null>(null);
+   const [cachedUid, setCachedUid] = useState<string | null>(() => localStorage.getItem('cached_uid') || null);
    const [showNetWorth, setShowNetWorth] = useState(localStorage.getItem('show_net_worth') !== 'false');
    const toggleNetWorth = () => { const newVal = !showNetWorth; setShowNetWorth(newVal); localStorage.setItem('show_net_worth', String(newVal)); };
    const [currentGroupId, setCurrentGroupId] = useState<string | null>(() => localStorage.getItem('cached_groupId') || null);
@@ -53,6 +54,9 @@ export default function App() {
    const [rates, setRates] = useState<Record<string, number>>(() => getCachedRates('TWD') || { 'TWD': 1, 'USD': 0.032, 'JPY': 4.6 });
    const [showAI, setShowAI] = useState(false);
    const [themeColor, setThemeColor] = useState(localStorage.getItem('theme_color') || 'indigo');
+   const [chartsReady, setChartsReady] = useState(false); // Used to defer chart rendering
+   
+   const activeUid = user?.uid || cachedUid;
 
    // Apply Theme
    useEffect(() => {
@@ -89,13 +93,11 @@ export default function App() {
    });
    const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
 
-   // Ref for background process
    const holdingsRef = useRef<AssetHolding[]>([]);
    useEffect(() => {
       holdingsRef.current = holdings;
    }, [holdings]);
 
-   // Handle PWA Shortcuts and Auth
    useEffect(() => {
       const params = new URLSearchParams(window.location.search);
       const source = params.get('source');
@@ -103,13 +105,6 @@ export default function App() {
          setActiveTab('ledger');
          setActiveModal('add-trans');
          setNotification("已透過捷徑快速啟動：記一筆");
-         setTimeout(() => setNotification(null), 4000);
-         window.history.replaceState({}, '', '/');
-      } else if (source === 'shortcut-scan') {
-         setActiveTab('ledger');
-         setBatchConfig({ target: 'ledger' });
-         setActiveModal('ai-batch');
-         setNotification("已透過捷徑快速啟動：掃描發票");
          setTimeout(() => setNotification(null), 4000);
          window.history.replaceState({}, '', '/');
       }
@@ -120,35 +115,37 @@ export default function App() {
       }
       const unsubscribe = onAuthStateChanged(auth, async (u) => {
          setUser(u);
+         if (u) {
+            setCachedUid(u.uid);
+            localStorage.setItem('cached_uid', u.uid);
+         } else {
+            setCachedUid(null);
+            localStorage.removeItem('cached_uid');
+         }
          setLoading(false);
       });
       return unsubscribe;
    }, []);
 
-   // Listen to User Profile and Groups
    useEffect(() => {
-      if (!user || !db) return;
-      // If no cached groupId, default to user.uid immediately so collections can start loading
+      if (!activeUid || !db) return;
       if (!currentGroupId) {
-         setCurrentGroupId(user.uid);
-         localStorage.setItem('cached_groupId', user.uid);
+         setCurrentGroupId(activeUid);
+         localStorage.setItem('cached_groupId', activeUid);
       }
-      const unsubProfile = onSnapshot(doc(db, getUserProfilePath(user.uid)), (docSnap) => {
+      const unsubProfile = onSnapshot(doc(db, getUserProfilePath(activeUid)), (docSnap) => {
          if (docSnap.exists()) {
             const data = docSnap.data();
             if (data.currentGroupId) {
                setCurrentGroupId(data.currentGroupId);
                localStorage.setItem('cached_groupId', data.currentGroupId);
             }
-         } else {
-            setCurrentGroupId(user.uid);
-            localStorage.setItem('cached_groupId', user.uid);
          }
       });
 
       const groupsQuery = query(
          collection(db, 'artifacts/wealthflow-stable-restore/groups'),
-         where('members', 'array-contains', user.uid)
+         where('members', 'array-contains', activeUid)
       );
 
       const unsubGroups = onSnapshot(groupsQuery, (snap) => {
@@ -157,30 +154,27 @@ export default function App() {
       });
 
       return () => { unsubProfile(); unsubGroups(); };
-   }, [user]);
+   }, [activeUid]);
 
-   // Auto Fetch Rates (use cache first, then fetch fresh)
    useEffect(() => {
       const cached = getCachedRates(baseCurrency);
       if (cached) setRates(cached);
       fetchExchangeRates(baseCurrency).then(r => { if (r) setRates(r); });
    }, [baseCurrency]);
 
-   // Auto Refresh Stock Prices (Every 15 mins, delayed start to not block UI)
    useEffect(() => {
-      if (!user) return;
+      if (!activeUid) return;
       const interval = setInterval(() => { updateAssetPrices(false); }, 15 * 60 * 1000);
       const initialTimer = setTimeout(() => updateAssetPrices(false), 15000);
       return () => { clearInterval(interval); clearTimeout(initialTimer); };
-   }, [user]);
+   }, [activeUid]);
 
-   // Check Recurring Rules (Hourly)
    useEffect(() => {
-      if (!user || recurringRules.length === 0) return;
+      if (!activeUid || recurringRules.length === 0) return;
       const interval = setInterval(() => { checkRecurringRules(); }, 60 * 60 * 1000);
       checkRecurringRules();
       return () => clearInterval(interval);
-   }, [recurringRules, user]);
+   }, [recurringRules, activeUid]);
 
    const checkRecurringRules = async () => {
       const today = new Date();
@@ -200,7 +194,7 @@ export default function App() {
             if (rule.isDRIP && rule.linkedHoldingId) {
                shouldUpdateCash = false;
                try {
-                  const holdingRef = doc(db, getCollectionPath(user!.uid, null, 'holdings'), rule.linkedHoldingId);
+                  const holdingRef = doc(db, getCollectionPath(activeUid, null, 'holdings'), rule.linkedHoldingId);
                   const holdingSnap = await getDoc(holdingRef);
                   if (holdingSnap.exists()) {
                      const h = holdingSnap.data() as AssetHolding;
@@ -218,13 +212,6 @@ export default function App() {
 
                      if (price && price > 0) {
                         const newShares = totalDividendAmount / price;
-                        // NOTE: For pure automation we are simplifying. Ideally we create a Lot here too.
-                        // But accessing subcollections in a loop is complex. 
-                        // We'll just update aggregate for automated DRIP for now, 
-                        // or implement Lot creation in `Modals` when user triggers it manually.
-                        // Automation is tricky for subcollections without batch logic here.
-                        // Let's stick to updating aggregate for automation to keep it reliable.
-
                         const oldTotalCost = h.quantity * h.avgCost;
                         const newTotalCost = oldTotalCost + totalDividendAmount;
                         const newQty = h.quantity + newShares;
@@ -236,8 +223,6 @@ export default function App() {
                            currentPrice: price
                         });
                         transDesc = `股息自動再投入 (DRIP): ${h.symbol} (DPS:${dividendPerShare}, 總額:${totalDividendAmount.toFixed(2)} -> 買入${newShares.toFixed(4)}股 @ ${price})`;
-                     } else {
-                        transDesc = `股息再投入異常: ${h.symbol} (無法取得股價)`;
                      }
                   }
                } catch (e) { console.error("DRIP Error", e); }
@@ -249,26 +234,25 @@ export default function App() {
                splitDetails: rule.splitDetails || { [rule.payerId]: transactionAmount },
                date: Timestamp.fromDate(new Date()), currency: 'TWD', isRecurring: true
             };
-            await addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'transactions')), newTrans);
+            await addDoc(collection(db, getCollectionPath(activeUid, currentGroupId, 'transactions')), newTrans);
 
             if (rule.linkedPlatformId && shouldUpdateCash) {
-               const platformRef = doc(db, getCollectionPath(user!.uid, null, 'platforms'), rule.linkedPlatformId);
+               const platformRef = doc(db, getCollectionPath(activeUid, null, 'platforms'), rule.linkedPlatformId);
                await updateDoc(platformRef, { balance: increment(rule.amount) });
             }
 
             const interval = rule.intervalMonths || 1;
             const nextMonth = new Date(nextDate);
             nextMonth.setMonth(nextMonth.getMonth() + interval);
-            await updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'recurring'), rule.id), { nextDate: Timestamp.fromDate(nextMonth) });
+            await updateDoc(doc(db, getCollectionPath(activeUid, currentGroupId, 'recurring'), rule.id), { nextDate: Timestamp.fromDate(nextMonth) });
          }
       }
    };
 
-   // Sync Private Data (always starts immediately after auth, no dependency on groupId)
    useEffect(() => {
-      if (!user || !db) return;
+      if (!activeUid || !db) return;
       const privateCols = ['platforms', 'holdings', 'accounts', 'bankLogs', 'creditCards', 'cardLogs', 'history'];
-      const privateUnsubs = privateCols.map(c => onSnapshot(c === 'history' ? query(collection(db, getCollectionPath(user.uid, null, c)), orderBy('date', 'asc')) : collection(db, getCollectionPath(user.uid, null, c)), s => {
+      const privateUnsubs = privateCols.map(c => onSnapshot(c === 'history' ? query(collection(db, getCollectionPath(activeUid, null, c)), orderBy('date', 'asc')) : collection(db, getCollectionPath(activeUid, null, c)), s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
          if (c === 'platforms') setPlatforms(data as Platform[]);
          if (c === 'holdings') setHoldings(data as AssetHolding[]);
@@ -279,17 +263,15 @@ export default function App() {
          if (c === 'history') setHistoryData(data as NetWorthHistory[]);
       }));
       return () => { privateUnsubs.forEach(u => u()); };
-   }, [user]);
+   }, [activeUid]);
 
-   // Sync Group Data (depends on currentGroupId, with localStorage caching for people/categories)
    useEffect(() => {
-      if (!user || !db || !currentGroupId) return;
+      if (!activeUid || !db || !currentGroupId) return;
       setDataReady(false);
       let firstResponse = false;
 
-      const groupId = currentGroupId;
       const groupCols = ['transactions', 'people', 'categories', 'recurring'];
-      const groupUnsubs = groupCols.map(c => onSnapshot(collection(db, getCollectionPath(user.uid, groupId, c)), s => {
+      const groupUnsubs = groupCols.map(c => onSnapshot(collection(db, getCollectionPath(activeUid, currentGroupId, c)), s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
          if (c === 'transactions') setTransactions(data as Transaction[]);
          if (c === 'people') {
@@ -304,7 +286,7 @@ export default function App() {
          if (!firstResponse) { firstResponse = true; setDataReady(true); }
       }));
       return () => { groupUnsubs.forEach(u => u()); };
-   }, [user, currentGroupId]);
+   }, [activeUid, currentGroupId]);
 
    const calculatedAccounts = useMemo(() => accounts.map(acc => {
       const logs = bankLogs.filter(l => l.accountId === acc.id);
@@ -322,48 +304,38 @@ export default function App() {
       return investVal + platformCashVal + cashVal;
    }, [holdings, platforms, calculatedAccounts, baseCurrency, rates]);
 
-   // Auto Record Daily Net Worth
    useEffect(() => {
-      if (!user || totalNetWorth === 0) return;
-
+      if (!activeUid || totalNetWorth === 0) return;
       const today = new Date().toISOString().split('T')[0];
       const lastEntry = historyData.length > 0 ? historyData[historyData.length - 1] : null;
       const lastDate = lastEntry?.date?.seconds ? new Date(lastEntry.date.seconds * 1000).toISOString().split('T')[0] : '';
-
       if (lastDate !== today) {
-         // Add new history entry
-         const addHistory = async () => {
-            const historyCol = collection(db, getCollectionPath(user.uid, null, 'history'));
-            await addDoc(historyCol, {
-               date: serverTimestamp(),
-               amount: totalNetWorth,
-               currency: baseCurrency
-            });
-         };
-         addHistory();
+         addDoc(collection(db, getCollectionPath(activeUid, null, 'history')), {
+            date: serverTimestamp(),
+            amount: totalNetWorth,
+            currency: baseCurrency
+         });
       }
-   }, [user, totalNetWorth, historyData, baseCurrency]);
+   }, [activeUid, totalNetWorth, historyData, baseCurrency]);
 
    const historyChartData = useMemo(() => historyData.map(h => ({ label: safeDate(h.date), value: h.amount })).slice(-14), [historyData]);
    const cashFlowChartData = useMemo(() => getMonthlyCashFlow(transactions, baseCurrency, rates), [transactions, baseCurrency, rates]);
 
    const updateAssetPrices = async (showFeedback = true) => {
       const currentHoldings = holdingsRef.current;
-      if (!currentHoldings.length || !user) return;
+      if (!currentHoldings.length || !activeUid) return;
       let updated = 0;
       let errors: string[] = [];
       const currentKey = localStorage.getItem('finnhub_key') || '';
-
-      // Parallel batch processing (max 5 concurrent) instead of sequential
       const BATCH_SIZE = 5;
       for (let i = 0; i < currentHoldings.length; i += BATCH_SIZE) {
          const batch = currentHoldings.slice(i, i + BATCH_SIZE);
-         const results = await Promise.allSettled(batch.map(async (h) => {
+         await Promise.allSettled(batch.map(async (h) => {
             let price = null;
             if (h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
             else { price = await fetchStockPrice(h.symbol, currentKey); if (!price) errors.push(h.symbol); }
             if (price) {
-               await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price });
+               await updateDoc(doc(db, getCollectionPath(activeUid, null, 'holdings'), h.id), { currentPrice: price });
                updated++;
             }
          }));
@@ -373,9 +345,9 @@ export default function App() {
    };
 
    const handleImport = async (data: any) => {
-      if (!user || !data) return;
+      if (!activeUid || !data) return;
       try {
-         for (const t of data.transactions || []) await addDoc(collection(db, getCollectionPath(user.uid, currentGroupId, 'transactions')), { ...t, date: t.date?.seconds ? Timestamp.fromDate(new Date(t.date.seconds * 1000)) : serverTimestamp() });
+         for (const t of data.transactions || []) await addDoc(collection(db, getCollectionPath(activeUid, currentGroupId, 'transactions')), { ...t, date: t.date?.seconds ? Timestamp.fromDate(new Date(t.date.seconds * 1000)) : serverTimestamp() });
          alert('匯入成功');
       } catch (e) { console.error(e); alert('匯入失敗'); }
    };
@@ -438,10 +410,19 @@ export default function App() {
       try { await updateDoc(doc(db, getUserProfilePath(user.uid)), { currentGroupId: groupId }); } catch (e) { console.error("Switch failed", e); }
    };
 
+   useEffect(() => {
+      if (dataReady) {
+         const t = setTimeout(() => setChartsReady(true), 150);
+         return () => clearTimeout(t);
+      } else {
+         setChartsReady(false);
+      }
+   }, [dataReady]);
+
    if (!auth) return <div className="h-screen flex items-center justify-center flex-col gap-4 text-slate-600"><div className="text-xl font-bold">Configuration Error</div><div className="text-sm">Firebase API Key not found.</div></div>;
-   if (loading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-indigo-600" size={32} /></div>;
-   if (!user) return <AuthScreen />;
-   if (user.email && !ADMIN_EMAILS.includes(user.email)) {
+   if (loading && !activeUid) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-indigo-600" size={32} /></div>;
+   if (!activeUid) return <AuthScreen />;
+   if (user && user.email && !ADMIN_EMAILS.includes(user.email)) {
       return (
          <div className="h-screen flex flex-col items-center justify-center bg-slate-50 p-4"><div className="bg-white p-8 rounded-2xl shadow-xl text-center max-w-md w-full animate-in zoom-in-95"><div className="mx-auto bg-red-100 p-4 rounded-full w-fit mb-4 text-red-600"><Lock size={32} /></div><h2 className="text-2xl font-bold text-slate-800 mb-2">權限不足</h2><p className="text-slate-500 mb-6 text-sm leading-relaxed">抱歉，此應用程式目前僅限管理員使用。<br />您的帳號 <span className="font-mono font-bold text-slate-700 bg-slate-100 px-1 rounded">{user.email}</span> 不在允許名單中。</p><button onClick={() => auth.signOut()} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-colors">登出帳號</button></div></div>
       );
@@ -458,7 +439,7 @@ export default function App() {
 
                <div className="relative flex-1 max-w-[180px]">
                   <select value={currentGroupId || ''} onChange={(e) => handleSwitchGroup(e.target.value)} className="appearance-none bg-slate-800 border border-slate-700 text-white py-1.5 pl-3 pr-8 rounded-lg text-xs font-bold outline-none w-full truncate focus:border-indigo-500 transition-colors text-center">
-                     {userGroups.map(g => (<option key={g.id} value={g.id}>{g.name} {g.id === user.uid ? '(個人)' : ''}</option>))}
+                     {userGroups.map(g => (<option key={g.id} value={g.id}>{g.name} {g.id === activeUid ? '(個人)' : ''}</option>))}
                   </select>
                   <ChevronDown size={12} className="absolute right-3 top-2.5 text-slate-400 pointer-events-none" />
                </div>
@@ -502,7 +483,7 @@ export default function App() {
                            <div className="h-32 bg-slate-50 rounded-xl animate-pulse mt-4"></div>
                         </div>
                      </div>
-                     {user && currentGroupId && people.length > 0 && (
+                     {activeUid && currentGroupId && people.length > 0 && (
                         <button onClick={() => setActiveModal('add-trans')} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold text-base flex items-center justify-center gap-2 shadow-lg hover:bg-indigo-700 active:scale-[0.98] transition-all">
                            <Plus size={20} /> 立即記一筆
                         </button>
@@ -511,8 +492,8 @@ export default function App() {
                )}
                {dataReady && activeTab === 'home' && (
                   <div className="space-y-4 animate-in slide-in-from-bottom-4">
-                     <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64"><h3 className="font-bold text-slate-700 text-sm mb-2 flex items-center gap-2"><LineChart size={16} /> 資產趨勢</h3><NetWorthAreaChart data={historyChartData} /></div>
-                     <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64"><h3 className="font-bold text-slate-700 text-sm mb-4 flex items-center gap-2"><TrendingUp size={16} /> 收支分析</h3><CashFlowBarChart data={cashFlowChartData} /></div>
+                     <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64"><h3 className="font-bold text-slate-700 text-sm mb-2 flex items-center gap-2"><LineChart size={16} /> 資產趨勢</h3>{chartsReady ? <NetWorthAreaChart data={historyChartData} /> : <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={24} /></div>}</div>
+                     <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64"><h3 className="font-bold text-slate-700 text-sm mb-4 flex items-center gap-2"><TrendingUp size={16} /> 收支分析</h3>{chartsReady ? <CashFlowBarChart data={cashFlowChartData} /> : <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={24} /></div>}</div>
                   </div>
                )}
                {dataReady && activeTab === 'invest' && <PortfolioView holdings={holdings} platforms={platforms} onAddPlatform={() => setActiveModal('add-platform')} onManagePlatform={() => setActiveModal('manage-platforms')} onManageCash={(p: any) => { setSelectedItem(p); setActiveModal('manage-cash') }} onAddAsset={() => setActiveModal('add-asset')} onUpdatePrices={() => updateAssetPrices(true)} onEdit={(h: any) => { setSelectedItem(h); setActiveModal('edit-asset-price') }} onSell={(h: any) => { setSelectedItem(h); setActiveModal('sell') }} onDividend={() => setActiveModal('add-dividend')} onRebalance={() => setActiveModal('rebalance')} baseCurrency={baseCurrency} rates={rates} convert={convert} CURRENCY_SYMBOLS={CURRENCY_SYMBOLS} />}
