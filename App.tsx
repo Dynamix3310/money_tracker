@@ -4,7 +4,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment, where } from 'firebase/firestore';
 import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock, BellRing, ChevronDown, Eye, EyeOff } from 'lucide-react';
 import { auth, db, getCollectionPath, getUserProfilePath } from './services/firebase';
-import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice } from './services/api';
+import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice, getCachedRates } from './services/api';
 import { ADMIN_EMAILS } from './services/gemini';
 import { ExpensePieChart, CashFlowBarChart, NetWorthAreaChart } from './components/Charts';
 import { SettingsModal, SellAssetModal, AddTransactionModal, AddAssetModal, AddAccountModal, AddCardModal, BankDetailModal, AIAssistantModal, CardDetailModal, TransferModal, EditAssetModal, ConfirmActionModal, AddPlatformModal, ManagePlatformCashModal, ManageListModal, AddRecurringModal, ManageRecurringModal, AIBatchImportModal, EditAssetPriceModal, AddDividendModal, PortfolioRebalanceModal } from './components/Modals';
@@ -45,11 +45,12 @@ export default function App() {
    const [userGroups, setUserGroups] = useState<Group[]>([]);
    const [loading, setLoading] = useState(true);
    const [notification, setNotification] = useState<string | null>(null);
+   const [dataReady, setDataReady] = useState(false);
 
    // App State
    const [activeTab, setActiveTab] = useState<'home' | 'invest' | 'ledger' | 'cash'>('home');
    const [baseCurrency, setBaseCurrency] = useState('TWD');
-   const [rates, setRates] = useState<Record<string, number>>({ 'TWD': 1, 'USD': 0.032, 'JPY': 4.6 });
+   const [rates, setRates] = useState<Record<string, number>>(() => getCachedRates('TWD') || { 'TWD': 1, 'USD': 0.032, 'JPY': 4.6 });
    const [showAI, setShowAI] = useState(false);
    const [themeColor, setThemeColor] = useState(localStorage.getItem('theme_color') || 'indigo');
 
@@ -147,16 +148,18 @@ export default function App() {
       return () => { unsubProfile(); unsubGroups(); };
    }, [user]);
 
-   // Auto Fetch Rates
+   // Auto Fetch Rates (use cache first, then fetch fresh)
    useEffect(() => {
+      const cached = getCachedRates(baseCurrency);
+      if (cached) setRates(cached);
       fetchExchangeRates(baseCurrency).then(r => { if (r) setRates(r); });
    }, [baseCurrency]);
 
-   // Auto Refresh Stock Prices (Every 15 mins)
+   // Auto Refresh Stock Prices (Every 15 mins, delayed start to not block UI)
    useEffect(() => {
       if (!user) return;
       const interval = setInterval(() => { updateAssetPrices(false); }, 15 * 60 * 1000);
-      const initialTimer = setTimeout(() => updateAssetPrices(false), 3000);
+      const initialTimer = setTimeout(() => updateAssetPrices(false), 15000);
       return () => { clearInterval(interval); clearTimeout(initialTimer); };
    }, [user]);
 
@@ -250,9 +253,19 @@ export default function App() {
       }
    };
 
-   // Sync Data
+   // Sync Data (with dataReady tracking for progressive UI)
    useEffect(() => {
       if (!user || !db) return;
+      setDataReady(false);
+      const readyFlags: Record<string, boolean> = {};
+      const markReady = (key: string) => {
+         readyFlags[key] = true;
+         // Consider data ready once core collections have responded
+         if (readyFlags['transactions'] || readyFlags['categories']) {
+            setDataReady(true);
+         }
+      };
+
       const privateCols = ['platforms', 'holdings', 'accounts', 'bankLogs', 'creditCards', 'cardLogs', 'history'];
       const privateUnsubs = privateCols.map(c => onSnapshot(c === 'history' ? query(collection(db, getCollectionPath(user.uid, null, c)), orderBy('date', 'asc')) : collection(db, getCollectionPath(user.uid, null, c)), s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -263,6 +276,7 @@ export default function App() {
          if (c === 'creditCards') setCreditCards(data as CreditCardInfo[]);
          if (c === 'cardLogs') setCardLogs(data as CreditCardLog[]);
          if (c === 'history') setHistoryData(data as NetWorthHistory[]);
+         markReady(c);
       }));
 
       let groupUnsubs: any[] = [];
@@ -275,7 +289,11 @@ export default function App() {
             if (c === 'people') setPeople(data as Person[]);
             if (c === 'categories') setCategories(data as Category[]);
             if (c === 'recurring') setRecurringRules(data as RecurringRule[]);
+            markReady(c);
          }));
+      } else {
+         // No group → mark group data as ready immediately
+         setDataReady(true);
       }
       return () => { [...privateUnsubs, ...groupUnsubs].forEach(u => u()); };
    }, [user, currentGroupId]);
@@ -325,17 +343,22 @@ export default function App() {
       const currentHoldings = holdingsRef.current;
       if (!currentHoldings.length || !user) return;
       let updated = 0;
-      let errors = [];
+      let errors: string[] = [];
       const currentKey = localStorage.getItem('finnhub_key') || '';
 
-      for (const h of currentHoldings) {
-         let price = null;
-         if (h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
-         else { price = await fetchStockPrice(h.symbol, currentKey); if (!price) errors.push(h.symbol); }
-         if (price) {
-            await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price });
-            updated++;
-         }
+      // Parallel batch processing (max 5 concurrent) instead of sequential
+      const BATCH_SIZE = 5;
+      for (let i = 0; i < currentHoldings.length; i += BATCH_SIZE) {
+         const batch = currentHoldings.slice(i, i + BATCH_SIZE);
+         const results = await Promise.allSettled(batch.map(async (h) => {
+            let price = null;
+            if (h.type === 'crypto') price = await fetchCryptoPrice(h.symbol);
+            else { price = await fetchStockPrice(h.symbol, currentKey); if (!price) errors.push(h.symbol); }
+            if (price) {
+               await updateDoc(doc(db, getCollectionPath(user.uid, null, 'holdings'), h.id), { currentPrice: price });
+               updated++;
+            }
+         }));
       }
       if (showFeedback && errors.length > 0) alert(`更新完成，但部分失敗: ${errors.join(', ')}`);
       else if (showFeedback) alert(`成功更新 ${updated} 筆資產價格`);
@@ -457,15 +480,34 @@ export default function App() {
          </header>
          <main className="flex-1 overflow-y-auto pb-24 scroll-smooth bg-slate-50/50">
             <div className="max-w-2xl mx-auto p-4 space-y-6">
-               {activeTab === 'home' && (
+               {!dataReady && (
+                  <div className="space-y-4 animate-in fade-in">
+                     <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                        <div className="flex items-center gap-3 mb-4">
+                           <Loader2 className="animate-spin text-indigo-500" size={18} />
+                           <span className="text-sm font-bold text-slate-500">正在同步資料...</span>
+                        </div>
+                        <div className="space-y-3">
+                           <div className="h-4 bg-slate-100 rounded-full animate-pulse w-3/4"></div>
+                           <div className="h-4 bg-slate-100 rounded-full animate-pulse w-1/2"></div>
+                           <div className="h-4 bg-slate-100 rounded-full animate-pulse w-5/6"></div>
+                           <div className="h-32 bg-slate-50 rounded-xl animate-pulse mt-4"></div>
+                        </div>
+                     </div>
+                     <button onClick={() => setActiveModal('add-trans')} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold text-base flex items-center justify-center gap-2 shadow-lg hover:bg-indigo-700 active:scale-[0.98] transition-all">
+                        <Plus size={20} /> 立即記一筆
+                     </button>
+                  </div>
+               )}
+               {dataReady && activeTab === 'home' && (
                   <div className="space-y-4 animate-in slide-in-from-bottom-4">
                      <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64"><h3 className="font-bold text-slate-700 text-sm mb-2 flex items-center gap-2"><LineChart size={16} /> 資產趨勢</h3><NetWorthAreaChart data={historyChartData} /></div>
                      <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64"><h3 className="font-bold text-slate-700 text-sm mb-4 flex items-center gap-2"><TrendingUp size={16} /> 收支分析</h3><CashFlowBarChart data={cashFlowChartData} /></div>
                   </div>
                )}
-               {activeTab === 'invest' && <PortfolioView holdings={holdings} platforms={platforms} onAddPlatform={() => setActiveModal('add-platform')} onManagePlatform={() => setActiveModal('manage-platforms')} onManageCash={(p: any) => { setSelectedItem(p); setActiveModal('manage-cash') }} onAddAsset={() => setActiveModal('add-asset')} onUpdatePrices={() => updateAssetPrices(true)} onEdit={(h: any) => { setSelectedItem(h); setActiveModal('edit-asset-price') }} onSell={(h: any) => { setSelectedItem(h); setActiveModal('sell') }} onDividend={() => setActiveModal('add-dividend')} onRebalance={() => setActiveModal('rebalance')} baseCurrency={baseCurrency} rates={rates} convert={convert} CURRENCY_SYMBOLS={CURRENCY_SYMBOLS} />}
-               {activeTab === 'ledger' && <LedgerView transactions={transactions} categories={categories} people={people} cardLogs={cardLogs} onAdd={() => setActiveModal('add-trans')} onEdit={(t: any) => { setSelectedItem(t); setActiveModal('edit-trans') }} currentGroupId={currentGroupId} userId={user?.uid} onDelete={(id: string) => confirmDelete(async () => { const t = transactions.find(tx => tx.id === id); if (t?.linkedBankTransactionId) { await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'bankLogs'), t.linkedBankTransactionId)); } await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'transactions'), id)); }, '確定刪除此筆記帳資料?')} onManageRecurring={() => setActiveModal('manage-recurring')} onBatchAdd={() => setActiveModal('ai-batch')} />}
-               {activeTab === 'cash' && <CashView accounts={calculatedAccounts} creditCards={creditCards} onTransfer={() => setActiveModal('transfer')} onAddAccount={() => setActiveModal('add-account')} onManageAccount={() => setActiveModal('manage-accounts')} onAddCard={() => setActiveModal('add-card')} onManageCard={() => setActiveModal('manage-cards')} onViewAccount={(acc: any) => { setSelectedItem(acc); setActiveModal('view-bank') }} onViewCard={(card: any) => { setSelectedItem(card); setActiveModal('view-card') }} />}
+               {dataReady && activeTab === 'invest' && <PortfolioView holdings={holdings} platforms={platforms} onAddPlatform={() => setActiveModal('add-platform')} onManagePlatform={() => setActiveModal('manage-platforms')} onManageCash={(p: any) => { setSelectedItem(p); setActiveModal('manage-cash') }} onAddAsset={() => setActiveModal('add-asset')} onUpdatePrices={() => updateAssetPrices(true)} onEdit={(h: any) => { setSelectedItem(h); setActiveModal('edit-asset-price') }} onSell={(h: any) => { setSelectedItem(h); setActiveModal('sell') }} onDividend={() => setActiveModal('add-dividend')} onRebalance={() => setActiveModal('rebalance')} baseCurrency={baseCurrency} rates={rates} convert={convert} CURRENCY_SYMBOLS={CURRENCY_SYMBOLS} />}
+               {dataReady && activeTab === 'ledger' && <LedgerView transactions={transactions} categories={categories} people={people} cardLogs={cardLogs} onAdd={() => setActiveModal('add-trans')} onEdit={(t: any) => { setSelectedItem(t); setActiveModal('edit-trans') }} currentGroupId={currentGroupId} userId={user?.uid} onDelete={(id: string) => confirmDelete(async () => { const t = transactions.find(tx => tx.id === id); if (t?.linkedBankTransactionId) { await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'bankLogs'), t.linkedBankTransactionId)); } await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'transactions'), id)); }, '確定刪除此筆記帳資料?')} onManageRecurring={() => setActiveModal('manage-recurring')} onBatchAdd={() => setActiveModal('ai-batch')} />}
+               {dataReady && activeTab === 'cash' && <CashView accounts={calculatedAccounts} creditCards={creditCards} onTransfer={() => setActiveModal('transfer')} onAddAccount={() => setActiveModal('add-account')} onManageAccount={() => setActiveModal('manage-accounts')} onAddCard={() => setActiveModal('add-card')} onManageCard={() => setActiveModal('manage-cards')} onViewAccount={(acc: any) => { setSelectedItem(acc); setActiveModal('view-bank') }} onViewCard={(card: any) => { setSelectedItem(card); setActiveModal('view-card') }} />}
             </div>
          </main>
          <div className="fixed bottom-24 right-4 flex flex-col gap-3 z-40">

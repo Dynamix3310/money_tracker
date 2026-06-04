@@ -7,9 +7,23 @@ export async function fetchExchangeRates(base: string = 'TWD') {
     // using a free open API for rates
     const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${base}`);
     const data = await response.json();
+    // Cache rates for instant next startup
+    if (data.rates) {
+      localStorage.setItem(`cached_rates_${base}`, JSON.stringify(data.rates));
+    }
     return data.rates;
   } catch (error) {
     console.error("Failed to fetch rates", error);
+    return null;
+  }
+}
+
+// Get cached rates instantly (for startup use)
+export function getCachedRates(base: string = 'TWD'): Record<string, number> | null {
+  try {
+    const cached = localStorage.getItem(`cached_rates_${base}`);
+    return cached ? JSON.parse(cached) : null;
+  } catch {
     return null;
   }
 }
