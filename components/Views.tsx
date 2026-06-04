@@ -306,8 +306,15 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
                         </div>
                     );})}
                     {viewMode === 'list' && (
-                        <div ref={observerTarget} className="h-10 w-full flex items-center justify-center">
-                            {displayLimit < filtered.length && <div className="text-slate-400 text-xs">載入更多...</div>}
+                        <div className="pb-4">
+                            <div ref={observerTarget} className="h-10 w-full flex items-center justify-center">
+                                {displayLimit < filtered.length && <div className="text-slate-400 text-xs">載入更多...</div>}
+                            </div>
+                            {displayLimit >= filtered.length && hasMoreDB && (
+                                <button onClick={onLoadMoreDB} className="w-full py-4 text-center text-sm font-bold text-indigo-600 bg-indigo-50 rounded-xl hover:bg-indigo-100 transition-colors">
+                                    載入更早的雲端紀錄 (目前已載入 {transactions.length} 筆)
+                                </button>
+                            )}
                         </div>
                     )}
                 </div>

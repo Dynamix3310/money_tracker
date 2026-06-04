@@ -55,6 +55,7 @@ export default function App() {
    const [showAI, setShowAI] = useState(false);
    const [themeColor, setThemeColor] = useState(localStorage.getItem('theme_color') || 'indigo');
    const [chartsReady, setChartsReady] = useState(false); // Used to defer chart rendering
+   const [txLimit, setTxLimit] = useState(500);
    
    const activeUid = user?.uid || cachedUid;
 
@@ -274,10 +275,9 @@ export default function App() {
       setDataReady(false);
       let firstResponse = false;
 
-      const groupCols = ['transactions', 'people', 'categories', 'recurring'];
-      const groupUnsubs = groupCols.map(c => onSnapshot(c === 'transactions' ? query(collection(db, getCollectionPath(activeUid, currentGroupId, c)), orderBy('date', 'desc'), limit(500)) : collection(db, getCollectionPath(activeUid, currentGroupId, c)), s => {
+      const groupCols = ['people', 'categories', 'recurring'];
+      const groupUnsubs = groupCols.map(c => onSnapshot(collection(db, getCollectionPath(activeUid, currentGroupId, c)), s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-         if (c === 'transactions') { setTransactions(data as Transaction[]); try { localStorage.setItem('cached_transactions', JSON.stringify(data.slice(0, 200))); } catch {} }
          if (c === 'people') { setPeople(data as Person[]); try { localStorage.setItem('cached_people', JSON.stringify(data)); } catch {} }
          if (c === 'categories') { setCategories(data as Category[]); try { localStorage.setItem('cached_categories', JSON.stringify(data)); } catch {} }
          if (c === 'recurring') { setRecurringRules(data as RecurringRule[]); try { localStorage.setItem('cached_recurring', JSON.stringify(data)); } catch {} }
@@ -285,6 +285,18 @@ export default function App() {
       }));
       return () => { groupUnsubs.forEach(u => u()); };
    }, [activeUid, currentGroupId]);
+
+   // Sync Transactions Separately (Allows infinite scroll without resetting UI)
+   useEffect(() => {
+      if (!activeUid || !db || !currentGroupId) return;
+      const q = query(collection(db, getCollectionPath(activeUid, currentGroupId, 'transactions')), orderBy('date', 'desc'), limit(txLimit));
+      const unsub = onSnapshot(q, s => {
+         const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+         setTransactions(data as Transaction[]);
+         try { localStorage.setItem('cached_transactions', JSON.stringify(data.slice(0, 200))); } catch {}
+      });
+      return () => unsub();
+   }, [activeUid, currentGroupId, txLimit]);
 
    const calculatedAccounts = useMemo(() => accounts.map(acc => {
       const logs = bankLogs.filter(l => l.accountId === acc.id);
@@ -495,7 +507,7 @@ export default function App() {
                   </div>
                )}
                {dataReady && activeTab === 'invest' && <PortfolioView holdings={holdings} platforms={platforms} onAddPlatform={() => setActiveModal('add-platform')} onManagePlatform={() => setActiveModal('manage-platforms')} onManageCash={(p: any) => { setSelectedItem(p); setActiveModal('manage-cash') }} onAddAsset={() => setActiveModal('add-asset')} onUpdatePrices={() => updateAssetPrices(true)} onEdit={(h: any) => { setSelectedItem(h); setActiveModal('edit-asset-price') }} onSell={(h: any) => { setSelectedItem(h); setActiveModal('sell') }} onDividend={() => setActiveModal('add-dividend')} onRebalance={() => setActiveModal('rebalance')} baseCurrency={baseCurrency} rates={rates} convert={convert} CURRENCY_SYMBOLS={CURRENCY_SYMBOLS} />}
-               {dataReady && activeTab === 'ledger' && <LedgerView transactions={transactions} categories={categories} people={people} cardLogs={cardLogs} onAdd={() => setActiveModal('add-trans')} onEdit={(t: any) => { setSelectedItem(t); setActiveModal('edit-trans') }} currentGroupId={currentGroupId} userId={user?.uid} onDelete={(id: string) => confirmDelete(async () => { const t = transactions.find(tx => tx.id === id); if (t?.linkedBankTransactionId) { await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'bankLogs'), t.linkedBankTransactionId)); } await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'transactions'), id)); }, '確定刪除此筆記帳資料?')} onManageRecurring={() => setActiveModal('manage-recurring')} onBatchAdd={() => setActiveModal('ai-batch')} />}
+               {dataReady && activeTab === 'ledger' && <LedgerView transactions={transactions} categories={categories} people={people} cardLogs={cardLogs} onAdd={() => setActiveModal('add-trans')} onEdit={(t: any) => { setSelectedItem(t); setActiveModal('edit-trans') }} currentGroupId={currentGroupId} userId={user?.uid} onDelete={(id: string) => confirmDelete(async () => { const t = transactions.find(tx => tx.id === id); if (t?.linkedBankTransactionId) { await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'bankLogs'), t.linkedBankTransactionId)); } await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'transactions'), id)); }, '確定刪除此筆記帳資料?')} onManageRecurring={() => setActiveModal('manage-recurring')} onBatchAdd={() => setActiveModal('ai-batch')} hasMoreDB={transactions.length >= txLimit} onLoadMoreDB={() => setTxLimit(l => l + 500)} />}
                {dataReady && activeTab === 'cash' && <CashView accounts={calculatedAccounts} creditCards={creditCards} onTransfer={() => setActiveModal('transfer')} onAddAccount={() => setActiveModal('add-account')} onManageAccount={() => setActiveModal('manage-accounts')} onAddCard={() => setActiveModal('add-card')} onManageCard={() => setActiveModal('manage-cards')} onViewAccount={(acc: any) => { setSelectedItem(acc); setActiveModal('view-bank') }} onViewCard={(card: any) => { setSelectedItem(card); setActiveModal('view-card') }} />}
             </div>
          </main>
