@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment, where } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment, where, limit } from 'firebase/firestore';
 import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock, BellRing, ChevronDown, Eye, EyeOff } from 'lucide-react';
 import { auth, db, getCollectionPath, getUserProfilePath } from './services/firebase';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice, getCachedRates } from './services/api';
@@ -253,7 +253,7 @@ export default function App() {
       const privateCols = ['platforms', 'holdings', 'accounts', 'bankLogs', 'creditCards', 'cardLogs', 'history'];
       const privateUnsubs = privateCols.map(c => {
          let q = collection(db, getCollectionPath(activeUid, null, c)) as any;
-         if (c === 'history') q = query(q, orderBy('date', 'asc'));
+         if (c === 'history') q = query(q, orderBy('date', 'desc'), limit(20));
          if (c === 'bankLogs' || c === 'cardLogs') q = query(q, orderBy('date', 'desc'));
          return onSnapshot(q, s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -263,7 +263,7 @@ export default function App() {
          if (c === 'bankLogs') { setBankLogs(data as BankTransaction[]); try { localStorage.setItem('cached_bankLogs', JSON.stringify(data.slice(0, 100))); } catch {} }
          if (c === 'creditCards') { setCreditCards(data as CreditCardInfo[]); try { localStorage.setItem('cached_creditCards', JSON.stringify(data)); } catch {} }
          if (c === 'cardLogs') { setCardLogs(data as CreditCardLog[]); try { localStorage.setItem('cached_cardLogs', JSON.stringify(data.slice(0, 100))); } catch {} }
-         if (c === 'history') { setHistoryData(data as NetWorthHistory[]); try { localStorage.setItem('cached_history', JSON.stringify(data.slice(-30))); } catch {} }
+         if (c === 'history') { setHistoryData((data as NetWorthHistory[]).reverse()); try { localStorage.setItem('cached_history', JSON.stringify(data.slice(-30))); } catch {} }
          });
       });
       return () => { privateUnsubs.forEach(u => u()); };
@@ -275,7 +275,7 @@ export default function App() {
       let firstResponse = false;
 
       const groupCols = ['transactions', 'people', 'categories', 'recurring'];
-      const groupUnsubs = groupCols.map(c => onSnapshot(c === 'transactions' ? query(collection(db, getCollectionPath(activeUid, currentGroupId, c)), orderBy('date', 'desc')) : collection(db, getCollectionPath(activeUid, currentGroupId, c)), s => {
+      const groupUnsubs = groupCols.map(c => onSnapshot(c === 'transactions' ? query(collection(db, getCollectionPath(activeUid, currentGroupId, c)), orderBy('date', 'desc'), limit(500)) : collection(db, getCollectionPath(activeUid, currentGroupId, c)), s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
          if (c === 'transactions') { setTransactions(data as Transaction[]); try { localStorage.setItem('cached_transactions', JSON.stringify(data.slice(0, 200))); } catch {} }
          if (c === 'people') { setPeople(data as Person[]); try { localStorage.setItem('cached_people', JSON.stringify(data)); } catch {} }
