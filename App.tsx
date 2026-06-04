@@ -76,22 +76,21 @@ export default function App() {
    // Batch Import Context
    const [batchConfig, setBatchConfig] = useState<{ target: 'ledger' | 'bank' | 'card', targetId?: string } | null>(null);
 
+   // Data Loading Helper
+   const loadCache = (key: string, defaultVal: any) => { try { const c = localStorage.getItem(key); return c ? JSON.parse(c) : defaultVal; } catch { return defaultVal; } };
+
    // Data
-   const [platforms, setPlatforms] = useState<Platform[]>([]);
-   const [holdings, setHoldings] = useState<AssetHolding[]>([]);
-   const [accounts, setAccounts] = useState<BankAccount[]>([]);
-   const [bankLogs, setBankLogs] = useState<BankTransaction[]>([]);
-   const [creditCards, setCreditCards] = useState<CreditCardInfo[]>([]);
-   const [cardLogs, setCardLogs] = useState<CreditCardLog[]>([]);
-   const [historyData, setHistoryData] = useState<NetWorthHistory[]>([]);
-   const [transactions, setTransactions] = useState<Transaction[]>([]);
-   const [people, setPeople] = useState<Person[]>(() => {
-      try { const c = localStorage.getItem('cached_people'); return c ? JSON.parse(c) : []; } catch { return []; }
-   });
-   const [categories, setCategories] = useState<Category[]>(() => {
-      try { const c = localStorage.getItem('cached_categories'); return c ? JSON.parse(c) : []; } catch { return []; }
-   });
-   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
+   const [platforms, setPlatforms] = useState<Platform[]>(() => loadCache('cached_platforms', []));
+   const [holdings, setHoldings] = useState<AssetHolding[]>(() => loadCache('cached_holdings', []));
+   const [accounts, setAccounts] = useState<BankAccount[]>(() => loadCache('cached_accounts', []));
+   const [bankLogs, setBankLogs] = useState<BankTransaction[]>(() => loadCache('cached_bankLogs', []));
+   const [creditCards, setCreditCards] = useState<CreditCardInfo[]>(() => loadCache('cached_creditCards', []));
+   const [cardLogs, setCardLogs] = useState<CreditCardLog[]>(() => loadCache('cached_cardLogs', []));
+   const [historyData, setHistoryData] = useState<NetWorthHistory[]>(() => loadCache('cached_history', []));
+   const [transactions, setTransactions] = useState<Transaction[]>(() => loadCache('cached_transactions', []));
+   const [people, setPeople] = useState<Person[]>(() => loadCache('cached_people', []));
+   const [categories, setCategories] = useState<Category[]>(() => loadCache('cached_categories', []));
+   const [recurringRules, setRecurringRules] = useState<RecurringRule[]>(() => loadCache('cached_recurring', []));
 
    const holdingsRef = useRef<AssetHolding[]>([]);
    useEffect(() => {
@@ -258,13 +257,13 @@ export default function App() {
          if (c === 'bankLogs' || c === 'cardLogs') q = query(q, orderBy('date', 'desc'));
          return onSnapshot(q, s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-         if (c === 'platforms') setPlatforms(data as Platform[]);
-         if (c === 'holdings') setHoldings(data as AssetHolding[]);
-         if (c === 'accounts') setAccounts(data as BankAccount[]);
-         if (c === 'bankLogs') setBankLogs(data as BankTransaction[]);
-         if (c === 'creditCards') setCreditCards(data as CreditCardInfo[]);
-         if (c === 'cardLogs') setCardLogs(data as CreditCardLog[]);
-         if (c === 'history') setHistoryData(data as NetWorthHistory[]);
+         if (c === 'platforms') { setPlatforms(data as Platform[]); try { localStorage.setItem('cached_platforms', JSON.stringify(data)); } catch {} }
+         if (c === 'holdings') { setHoldings(data as AssetHolding[]); try { localStorage.setItem('cached_holdings', JSON.stringify(data)); } catch {} }
+         if (c === 'accounts') { setAccounts(data as BankAccount[]); try { localStorage.setItem('cached_accounts', JSON.stringify(data)); } catch {} }
+         if (c === 'bankLogs') { setBankLogs(data as BankTransaction[]); try { localStorage.setItem('cached_bankLogs', JSON.stringify(data.slice(0, 100))); } catch {} }
+         if (c === 'creditCards') { setCreditCards(data as CreditCardInfo[]); try { localStorage.setItem('cached_creditCards', JSON.stringify(data)); } catch {} }
+         if (c === 'cardLogs') { setCardLogs(data as CreditCardLog[]); try { localStorage.setItem('cached_cardLogs', JSON.stringify(data.slice(0, 100))); } catch {} }
+         if (c === 'history') { setHistoryData(data as NetWorthHistory[]); try { localStorage.setItem('cached_history', JSON.stringify(data.slice(-30))); } catch {} }
          });
       });
       return () => { privateUnsubs.forEach(u => u()); };
@@ -278,16 +277,10 @@ export default function App() {
       const groupCols = ['transactions', 'people', 'categories', 'recurring'];
       const groupUnsubs = groupCols.map(c => onSnapshot(c === 'transactions' ? query(collection(db, getCollectionPath(activeUid, currentGroupId, c)), orderBy('date', 'desc')) : collection(db, getCollectionPath(activeUid, currentGroupId, c)), s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-         if (c === 'transactions') setTransactions(data as Transaction[]);
-         if (c === 'people') {
-            setPeople(data as Person[]);
-            try { localStorage.setItem('cached_people', JSON.stringify(data)); } catch {}
-         }
-         if (c === 'categories') {
-            setCategories(data as Category[]);
-            try { localStorage.setItem('cached_categories', JSON.stringify(data)); } catch {}
-         }
-         if (c === 'recurring') setRecurringRules(data as RecurringRule[]);
+         if (c === 'transactions') { setTransactions(data as Transaction[]); try { localStorage.setItem('cached_transactions', JSON.stringify(data.slice(0, 200))); } catch {} }
+         if (c === 'people') { setPeople(data as Person[]); try { localStorage.setItem('cached_people', JSON.stringify(data)); } catch {} }
+         if (c === 'categories') { setCategories(data as Category[]); try { localStorage.setItem('cached_categories', JSON.stringify(data)); } catch {} }
+         if (c === 'recurring') { setRecurringRules(data as RecurringRule[]); try { localStorage.setItem('cached_recurring', JSON.stringify(data)); } catch {} }
          if (!firstResponse) { firstResponse = true; setDataReady(true); }
       }));
       return () => { groupUnsubs.forEach(u => u()); };
