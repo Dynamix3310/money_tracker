@@ -372,15 +372,15 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     const [payerMode, setPayerMode] = useState<'single' | 'multi'>('single');
     const [splitMode, setSplitMode] = useState<'equal' | 'custom' | 'single'>('single');
     const [isRecurring, setIsRecurring] = useState(false);
-    const [mainPayerId, setMainPayerId] = useState(editData?.payers ? Object.keys(editData.payers)[0] : (people.find((p: any) => p.isMe || p.uid === auth.currentUser?.uid)?.id || people[0]?.id || ''));
-    const [singleSplitPayerId, setSingleSplitPayerId] = useState(editData?.splitDetails ? Object.keys(editData.splitDetails).find(k => editData.splitDetails[k] > 0) || '' : ''); // Who pays 100% in single split mode
-    const [multiPayers, setMultiPayers] = useState<Record<string, string>>(editData?.payers && Object.keys(editData.payers).length > 1 ? Object.fromEntries(Object.entries(editData.payers).map(([k, v]: any) => [k, v.toString()])) : {});
-    const [customSplits, setCustomSplits] = useState<Record<string, string>>(editData?.splitDetails ? Object.fromEntries(Object.entries(editData.splitDetails).map(([k, v]: any) => [k, v.toString()])) : {});
+    const [mainPayerId, setMainPayerId] = useState(editData ? Object.keys(editData.payers)[0] : (people.find((p: any) => p.isMe || p.uid === auth.currentUser?.uid)?.id || people[0]?.id || ''));
+    const [singleSplitPayerId, setSingleSplitPayerId] = useState(editData ? Object.keys(editData.splitDetails).find(k => editData.splitDetails[k] > 0) || '' : ''); // Who pays 100% in single split mode
+    const [multiPayers, setMultiPayers] = useState<Record<string, string>>(editData && Object.keys(editData.payers).length > 1 ? Object.fromEntries(Object.entries(editData.payers).map(([k, v]: any) => [k, v.toString()])) : {});
+    const [customSplits, setCustomSplits] = useState<Record<string, string>>(editData && editData.splitDetails ? Object.fromEntries(Object.entries(editData.splitDetails).map(([k, v]: any) => [k, v.toString()])) : {});
     const [loadingAI, setLoadingAI] = useState(false);
     const [isFromBank, setIsFromBank] = useState(!!editData?.linkedBankAccountId);
     const [selectedAccountId, setSelectedAccountId] = useState(editData?.linkedBankAccountId || (accounts?.length ? accounts[0].id : ''));
 
-    useEffect(() => { if (editData) { if (editData.payers && Object.keys(editData.payers).length > 1) setPayerMode('multi'); const values: number[] = editData.splitDetails ? Object.values(editData.splitDetails) : []; if (values.length > 0 && (Math.max(...values) - Math.min(...values) > 1)) setSplitMode('custom'); } }, []);
+    useEffect(() => { if (editData) { if (Object.keys(editData.payers).length > 1) setPayerMode('multi'); const values: number[] = Object.values(editData.splitDetails); if (values.length > 0 && (Math.max(...values) - Math.min(...values) > 1)) setSplitMode('custom'); } }, []);
     const currentCats = useMemo(() => categories.filter((c: any) => c.type === type).sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [categories, type]);
     useEffect(() => { if (currentCats.length > 0 && !category) setCategory(currentCats[0].name); }, [type, categories]);
 
@@ -447,10 +447,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
             }
         }
 
-        onClose(); // Close modal immediately for instant UI response
-
-        try {
-            const data: any = { totalAmount: finalAmt, description, category, type, payers, splitDetails: splits, date: Timestamp.fromDate(new Date(date)), currency: 'TWD', sourceAmount: parseFloat(amount), sourceCurrency: currency, exchangeRate: currency === 'TWD' ? 1 : (finalAmt / parseFloat(amount)), linkedBankAccountId: (isFromBank && selectedAccountId) ? selectedAccountId : null };
+        const data: any = { totalAmount: finalAmt, description, category, type, payers, splitDetails: splits, date: Timestamp.fromDate(new Date(date)), currency: 'TWD', sourceAmount: parseFloat(amount), sourceCurrency: currency, exchangeRate: currency === 'TWD' ? 1 : (finalAmt / parseFloat(amount)), linkedBankAccountId: (isFromBank && selectedAccountId) ? selectedAccountId : null };
         const col = collection(db, getCollectionPath(userId, groupId, 'transactions'));
         let transId = editData?.id;
         if (editData) {
@@ -486,7 +483,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
             const nm = new Date(date); nm.setMonth(nm.getMonth() + 1);
             await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), { name: description, amount: finalAmt, type, category, payerId: mainPayerId, payers, splitDetails: splits, frequency: 'monthly', active: true, nextDate: Timestamp.fromDate(nm) });
         }
-        } catch (e) { console.error("Save failed", e); alert("儲存失敗，請重試"); }
+        onClose();
     };
 
     return (
@@ -1203,7 +1200,7 @@ export const BankDetailModal = ({ userId, account, logs, onClose, onImport }: an
         const a = document.createElement('a'); a.href = url; a.download = `${account.name}_logs.csv`; a.click();
     };
 
-    const groupedLogs = logs.reduce((acc: any, log: any) => {
+    const groupedLogs = logs.sort((a: any, b: any) => (Number(b.date?.seconds) || 0) - (Number(a.date?.seconds) || 0)).reduce((acc: any, log: any) => {
         const d = log.date?.seconds ? new Date(Number(log.date.seconds) * 1000) : new Date();
         const key = `${d.getFullYear()}年${d.getMonth() + 1}月`;
         if (!acc[key]) acc[key] = [];
@@ -1317,7 +1314,7 @@ export const CardDetailModal = ({ userId, card, cardLogs, allCardLogs, transacti
         if (!l.date?.seconds) return false;
         const d = new Date(Number(l.date.seconds) * 1000);
         return d.getTime() >= currentCycleStart.getTime() && d.getTime() <= currentCycleEnd.getTime();
-    });
+    }).sort((a: any, b: any) => (Number(b.date?.seconds) || 0) - (Number(a.date?.seconds) || 0));
     const handleSaveLog = async () => {
         if (!amt || !desc) return;
         const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));
@@ -1695,7 +1692,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                                 {target === 'ledger' && (
                                     <select onChange={(e) => {
                                         if (e.target.value) {
-                                            setParsedItems(parsedItems.map(p => ({...p, currency: e.target.value})));
+                                            setParsedItems(parsedItems.map(p => ({ ...p, currency: e.target.value })));
                                             e.target.value = ""; // Reset after selection
                                         }
                                     }} className="text-xs bg-slate-100 text-slate-600 border border-slate-200 rounded p-1 outline-none">

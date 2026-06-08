@@ -55,8 +55,7 @@ export default function App() {
    const [showAI, setShowAI] = useState(false);
    const [themeColor, setThemeColor] = useState(localStorage.getItem('theme_color') || 'indigo');
    const [chartsReady, setChartsReady] = useState(false); // Used to defer chart rendering
-   const [txLimit, setTxLimit] = useState(500);
-   
+
    const activeUid = user?.uid || cachedUid;
 
    // Apply Theme
@@ -257,14 +256,14 @@ export default function App() {
          if (c === 'history') q = query(q, orderBy('date', 'desc'), limit(20));
          if (c === 'bankLogs' || c === 'cardLogs') q = query(q, orderBy('date', 'desc'));
          return onSnapshot(q, s => {
-         const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-         if (c === 'platforms') { setPlatforms(data as Platform[]); try { localStorage.setItem('cached_platforms', JSON.stringify(data)); } catch {} }
-         if (c === 'holdings') { setHoldings(data as AssetHolding[]); try { localStorage.setItem('cached_holdings', JSON.stringify(data)); } catch {} }
-         if (c === 'accounts') { setAccounts(data as BankAccount[]); try { localStorage.setItem('cached_accounts', JSON.stringify(data)); } catch {} }
-         if (c === 'bankLogs') { setBankLogs(data as BankTransaction[]); try { localStorage.setItem('cached_bankLogs', JSON.stringify(data.slice(0, 100))); } catch {} }
-         if (c === 'creditCards') { setCreditCards(data as CreditCardInfo[]); try { localStorage.setItem('cached_creditCards', JSON.stringify(data)); } catch {} }
-         if (c === 'cardLogs') { setCardLogs(data as CreditCardLog[]); try { localStorage.setItem('cached_cardLogs', JSON.stringify(data.slice(0, 100))); } catch {} }
-         if (c === 'history') { setHistoryData((data as NetWorthHistory[]).reverse()); try { localStorage.setItem('cached_history', JSON.stringify(data.slice(-30))); } catch {} }
+            const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+            if (c === 'platforms') { setPlatforms(data as Platform[]); try { localStorage.setItem('cached_platforms', JSON.stringify(data)); } catch { } }
+            if (c === 'holdings') { setHoldings(data as AssetHolding[]); try { localStorage.setItem('cached_holdings', JSON.stringify(data)); } catch { } }
+            if (c === 'accounts') { setAccounts(data as BankAccount[]); try { localStorage.setItem('cached_accounts', JSON.stringify(data)); } catch { } }
+            if (c === 'bankLogs') { setBankLogs(data as BankTransaction[]); try { localStorage.setItem('cached_bankLogs', JSON.stringify(data.slice(0, 100))); } catch { } }
+            if (c === 'creditCards') { setCreditCards(data as CreditCardInfo[]); try { localStorage.setItem('cached_creditCards', JSON.stringify(data)); } catch { } }
+            if (c === 'cardLogs') { setCardLogs(data as CreditCardLog[]); try { localStorage.setItem('cached_cardLogs', JSON.stringify(data.slice(0, 100))); } catch { } }
+            if (c === 'history') { setHistoryData((data as NetWorthHistory[]).reverse()); try { localStorage.setItem('cached_history', JSON.stringify(data.slice(-30))); } catch { } }
          });
       });
       return () => { privateUnsubs.forEach(u => u()); };
@@ -275,28 +274,17 @@ export default function App() {
       setDataReady(false);
       let firstResponse = false;
 
-      const groupCols = ['people', 'categories', 'recurring'];
-      const groupUnsubs = groupCols.map(c => onSnapshot(collection(db, getCollectionPath(activeUid, currentGroupId, c)), s => {
+      const groupCols = ['transactions', 'people', 'categories', 'recurring'];
+      const groupUnsubs = groupCols.map(c => onSnapshot(c === 'transactions' ? query(collection(db, getCollectionPath(activeUid, currentGroupId, c)), orderBy('date', 'desc'), limit(500)) : collection(db, getCollectionPath(activeUid, currentGroupId, c)), s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-         if (c === 'people') { setPeople(data as Person[]); try { localStorage.setItem('cached_people', JSON.stringify(data)); } catch {} }
-         if (c === 'categories') { setCategories(data as Category[]); try { localStorage.setItem('cached_categories', JSON.stringify(data)); } catch {} }
-         if (c === 'recurring') { setRecurringRules(data as RecurringRule[]); try { localStorage.setItem('cached_recurring', JSON.stringify(data)); } catch {} }
+         if (c === 'transactions') { setTransactions(data as Transaction[]); try { localStorage.setItem('cached_transactions', JSON.stringify(data.slice(0, 200))); } catch { } }
+         if (c === 'people') { setPeople(data as Person[]); try { localStorage.setItem('cached_people', JSON.stringify(data)); } catch { } }
+         if (c === 'categories') { setCategories(data as Category[]); try { localStorage.setItem('cached_categories', JSON.stringify(data)); } catch { } }
+         if (c === 'recurring') { setRecurringRules(data as RecurringRule[]); try { localStorage.setItem('cached_recurring', JSON.stringify(data)); } catch { } }
          if (!firstResponse) { firstResponse = true; setDataReady(true); }
       }));
       return () => { groupUnsubs.forEach(u => u()); };
    }, [activeUid, currentGroupId]);
-
-   // Sync Transactions Separately (Allows infinite scroll without resetting UI)
-   useEffect(() => {
-      if (!activeUid || !db || !currentGroupId) return;
-      const q = query(collection(db, getCollectionPath(activeUid, currentGroupId, 'transactions')), orderBy('date', 'desc'), limit(txLimit));
-      const unsub = onSnapshot(q, s => {
-         const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-         setTransactions(data as Transaction[]);
-         try { localStorage.setItem('cached_transactions', JSON.stringify(data.slice(0, 200))); } catch {}
-      });
-      return () => unsub();
-   }, [activeUid, currentGroupId, txLimit]);
 
    const calculatedAccounts = useMemo(() => accounts.map(acc => {
       const logs = bankLogs.filter(l => l.accountId === acc.id);
@@ -507,7 +495,7 @@ export default function App() {
                   </div>
                )}
                {dataReady && activeTab === 'invest' && <PortfolioView holdings={holdings} platforms={platforms} onAddPlatform={() => setActiveModal('add-platform')} onManagePlatform={() => setActiveModal('manage-platforms')} onManageCash={(p: any) => { setSelectedItem(p); setActiveModal('manage-cash') }} onAddAsset={() => setActiveModal('add-asset')} onUpdatePrices={() => updateAssetPrices(true)} onEdit={(h: any) => { setSelectedItem(h); setActiveModal('edit-asset-price') }} onSell={(h: any) => { setSelectedItem(h); setActiveModal('sell') }} onDividend={() => setActiveModal('add-dividend')} onRebalance={() => setActiveModal('rebalance')} baseCurrency={baseCurrency} rates={rates} convert={convert} CURRENCY_SYMBOLS={CURRENCY_SYMBOLS} />}
-               {dataReady && activeTab === 'ledger' && <LedgerView transactions={transactions || []} categories={categories} people={people} cardLogs={cardLogs} onAdd={() => setActiveModal('add-trans')} onEdit={(t: any) => { setSelectedItem(t); setActiveModal('edit-trans') }} currentGroupId={currentGroupId} userId={user?.uid} onDelete={(id: string) => confirmDelete(async () => { const t = (transactions || []).find(tx => tx.id === id); if (t?.linkedBankTransactionId) { await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'bankLogs'), t.linkedBankTransactionId)); } await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'transactions'), id)); }, '確定刪除此筆記帳資料?')} onManageRecurring={() => setActiveModal('manage-recurring')} onBatchAdd={() => setActiveModal('ai-batch')} hasMoreDB={(transactions || []).length >= txLimit} onLoadMoreDB={() => setTxLimit(l => l + 500)} />}
+               {dataReady && activeTab === 'ledger' && <LedgerView transactions={transactions} categories={categories} people={people} cardLogs={cardLogs} onAdd={() => setActiveModal('add-trans')} onEdit={(t: any) => { setSelectedItem(t); setActiveModal('edit-trans') }} currentGroupId={currentGroupId} userId={user?.uid} onDelete={(id: string) => confirmDelete(async () => { const t = transactions.find(tx => tx.id === id); if (t?.linkedBankTransactionId) { await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'bankLogs'), t.linkedBankTransactionId)); } await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'transactions'), id)); }, '確定刪除此筆記帳資料?')} onManageRecurring={() => setActiveModal('manage-recurring')} onBatchAdd={() => setActiveModal('ai-batch')} />}
                {dataReady && activeTab === 'cash' && <CashView accounts={calculatedAccounts} creditCards={creditCards} onTransfer={() => setActiveModal('transfer')} onAddAccount={() => setActiveModal('add-account')} onManageAccount={() => setActiveModal('manage-accounts')} onAddCard={() => setActiveModal('add-card')} onManageCard={() => setActiveModal('manage-cards')} onViewAccount={(acc: any) => { setSelectedItem(acc); setActiveModal('view-bank') }} onViewCard={(card: any) => { setSelectedItem(card); setActiveModal('view-card') }} />}
             </div>
          </main>
@@ -524,7 +512,7 @@ export default function App() {
             </div>
          </nav>
          {activeModal === 'settings' && <SettingsModal onClose={() => setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} onGroupCreate={handleCreateGroup} onGroupSwitch={handleSwitchGroup} currentGroupId={currentGroupId} groups={userGroups} user={user} categories={categories} onAddCategory={(name: string, type: string, budget: number) => addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'categories')), { name, type, budgetLimit: budget || 0 })} onUpdateCategory={(id: string, data: any) => updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id), data)} onDeleteCategory={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id)), '確定刪除此分類? (需二次確認)')} currentTheme={themeColor} onSetTheme={setThemeColor} />}
-         {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal(null); setSelectedItem(null) }} editData={activeModal === 'edit-trans' ? selectedItem : null} rates={rates} convert={convert} accounts={calculatedAccounts} />}
+         {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal(null); setSelectedItem(null) }} editData={selectedItem} rates={rates} convert={convert} accounts={calculatedAccounts} />}
          {activeModal === 'ai-batch' && <AIBatchImportModal initialConfig={batchConfig} userId={user?.uid} groupId={currentGroupId} categories={categories} existingTransactions={transactions} accounts={accounts} creditCards={creditCards} existingBankLogs={bankLogs} existingCardLogs={cardLogs} people={people} onClose={() => { setActiveModal(null); setBatchConfig(null); }} />}
          {activeModal === 'manage-recurring' && <ManageRecurringModal rules={recurringRules} onClose={() => setActiveModal(null)} onAdd={() => setActiveModal('add-recurring')} onEdit={(r: any) => { setSelectedItem(r); setActiveModal('add-recurring') }} onDelete={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'recurring'), id)), '確定刪除此固定收支規則?')} />}
          {activeModal === 'add-recurring' && <AddRecurringModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal('manage-recurring'); setSelectedItem(null) }} editData={selectedItem} />}

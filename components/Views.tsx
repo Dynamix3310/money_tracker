@@ -51,8 +51,8 @@ export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlat
 };
 
 // --- Ledger View ---
-export const LedgerView = ({ transactions, categories: rawCategories, people, onAdd, onBatchAdd, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring, hasMoreDB, onLoadMoreDB }: any) => {
-    const categories = useMemo(() => [...(rawCategories || [])].sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [rawCategories]);
+export const LedgerView = ({ transactions, categories: rawCategories, people, onAdd, onBatchAdd, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring }: any) => {
+    const categories = useMemo(() => [...rawCategories].sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [rawCategories]);
     const [viewMode, setViewMode] = useState<'list' | 'stats' | 'debts' | 'budget'>('list');
     const [searchTerm, setSearchTerm] = useState('');
     const [timeRange, setTimeRange] = useState<'week' | 'month' | 'lastMonth' | 'year' | 'custom'>('month');
@@ -61,21 +61,22 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
     const [statsFilter, setStatsFilter] = useState<string>('all'); // 'all' or personId
 
     const [displayLimit, setDisplayLimit] = useState(50);
-    const observer = useRef<IntersectionObserver | null>(null);
-    const observerTarget = useCallback((node: any) => {
-        if (observer.current) observer.current.disconnect();
-        observer.current = new IntersectionObserver(entries => {
+    const observerTarget = useRef(null);
+
+    useEffect(() => {
+        const observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting) {
                 setDisplayLimit(prev => prev + 50);
             }
         }, { threshold: 0.1 });
-        if (node) observer.current.observe(node);
-    }, []);
+        if (observerTarget.current) observer.observe(observerTarget.current);
+        return () => observer.disconnect();
+    }, [viewMode]);
 
-    const linkedIds = useMemo(() => new Set((cardLogs || []).filter((c: any) => c.isReconciled && c.linkedTransactionId).map((c: any) => c.linkedTransactionId)), [cardLogs]);
+    const linkedIds = useMemo(() => new Set(cardLogs.filter((c: any) => c.isReconciled && c.linkedTransactionId).map((c: any) => c.linkedTransactionId)), [cardLogs]);
 
     const myPersonId = useMemo(() => {
-        return (people || []).find((p: any) => p.uid === userId || p.isMe)?.id;
+        return people.find((p: any) => p.uid === userId || p.isMe)?.id;
     }, [people, userId]);
 
     const getDateRange = () => {
@@ -121,8 +122,8 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
     const { start: filterStart, end: filterEnd } = useMemo(getDateRange, [timeRange, customStart, customEnd]);
 
     const filtered = useMemo(() => {
-        return (transactions || []).filter((t: any) => {
-            const matchSearch = (t.description || '').toLowerCase().includes(searchTerm.toLowerCase()) || (t.category || '').includes(searchTerm);
+        return transactions.filter((t: any) => {
+            const matchSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase()) || t.category.includes(searchTerm);
 
             if (viewMode === 'stats') {
                 if (!t.date?.seconds) return false;
@@ -131,7 +132,7 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
             }
 
             return matchSearch;
-        });
+        }).sort((a: any, b: any) => (b.date?.seconds || 0) - (a.date?.seconds || 0));
     }, [transactions, searchTerm, viewMode, filterStart, filterEnd]);
 
     const groupedTransactions = useMemo(() => {
@@ -149,8 +150,8 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
 
     const debtData = useMemo(() => {
         const balances: Record<string, number> = {};
-        (people || []).forEach((p: any) => balances[p.id] = 0);
-        (transactions || []).forEach((t: any) => {
+        people.forEach((p: any) => balances[p.id] = 0);
+        transactions.forEach((t: any) => {
             if (t.type === 'expense') {
                 Object.entries(t.payers).forEach(([pid, amount]: any) => { balances[pid] = (balances[pid] || 0) + amount; });
                 Object.entries(t.splitDetails).forEach(([pid, amount]: any) => { balances[pid] = (balances[pid] || 0) - amount; });
@@ -255,68 +256,59 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
                     }).map(dayKey => {
                         const list = groupedTransactions[dayKey];
                         return (
-                        <div key={dayKey}>
-                            <div className="text-xs font-bold text-slate-400 mb-2 ml-1">{dayKey}</div>
-                            <div className="space-y-2">
-                                {(list as any[]).map((t: any) => {
-                                    const myShare = myPersonId && t.type === 'expense' ? t.splitDetails?.[myPersonId] : 0;
-                                    return (
-                                        <div key={t.id} className="bg-white px-4 py-3 rounded-xl border border-slate-100 flex justify-between items-center group">
-                                            <div className="flex gap-3 items-center">
-                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${t.type === 'income' ? 'bg-emerald-500' : 'bg-blue-500'} relative`}>
-                                                    {t.category?.[0]}
-                                                    {linkedIds.has(t.id) && <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 border shadow-sm"><Link2 size={10} className="text-indigo-600" /></div>}
-                                                </div>
-                                                <div><div className="font-bold text-slate-800 text-sm">{t.description}</div><div className="text-[10px] text-slate-400">{t.date?.seconds ? new Date(t.date.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''} • {t.category} {t.isRecurring && '(自動)'}</div></div>
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <div className="text-right">
-                                                    <div className={`font-bold font-mono ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
-                                                        {t.type === 'income' ? '+' : ''}{(t.totalAmount || t.amount || 0).toLocaleString()} <span className="text-xs font-normal text-slate-400">$</span>
+                            <div key={dayKey}>
+                                <div className="text-xs font-bold text-slate-400 mb-2 ml-1">{dayKey}</div>
+                                <div className="space-y-2">
+                                    {(list as any[]).map((t: any) => {
+                                        const myShare = myPersonId && t.type === 'expense' ? t.splitDetails?.[myPersonId] : 0;
+                                        return (
+                                            <div key={t.id} className="bg-white px-4 py-3 rounded-xl border border-slate-100 flex justify-between items-center group">
+                                                <div className="flex gap-3 items-center">
+                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${t.type === 'income' ? 'bg-emerald-500' : 'bg-blue-500'} relative`}>
+                                                        {t.category?.[0]}
+                                                        {linkedIds.has(t.id) && <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 border shadow-sm"><Link2 size={10} className="text-indigo-600" /></div>}
                                                     </div>
-                                                    {myShare > 0 && t.payers?.[myPersonId] > 0 && (
-                                                        <div className="text-xs text-sky-600 font-bold mt-0.5">
-                                                            <span className="text-[10px] text-slate-400 font-normal mr-1">已付</span>
-                                                            {Math.round(t.payers[myPersonId]).toLocaleString()}
-                                                        </div>
-                                                    )}
-                                                    {myShare > 0 && (
-                                                        <div className="text-xs text-indigo-600 font-bold mt-0.5">
-                                                            <span className="text-[10px] text-slate-400 font-normal mr-1">自付</span>
-                                                            {Math.round(myShare).toLocaleString()}
-                                                        </div>
-                                                    )}
-                                                    {myShare <= 0 && t.payers?.[myPersonId] > 0 && (
-                                                        <div className="text-xs text-sky-600 font-bold mt-0.5">
-                                                            <span className="text-[10px] text-slate-400 font-normal mr-1">已付</span>
-                                                            {Math.round(t.payers[myPersonId]).toLocaleString()}
-                                                        </div>
-                                                    )}
+                                                    <div><div className="font-bold text-slate-800 text-sm">{t.description}</div><div className="text-[10px] text-slate-400">{t.date?.seconds ? new Date(t.date.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''} • {t.category} {t.isRecurring && '(自動)'}</div></div>
                                                 </div>
-                                                <div className="flex flex-col gap-1">
-                                                    <button onClick={() => onEdit(t)} className="text-slate-300 hover:text-indigo-500 p-1"><Edit size={14} /></button>
-                                                    <button onClick={() => onDelete(t.id)} className="text-slate-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="text-right">
+                                                        <div className={`font-bold font-mono ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
+                                                            {t.type === 'income' ? '+' : ''}{t.totalAmount.toLocaleString()} <span className="text-xs font-normal text-slate-400">$</span>
+                                                        </div>
+                                                        {myShare > 0 && t.payers?.[myPersonId] > 0 && (
+                                                            <div className="text-xs text-sky-600 font-bold mt-0.5">
+                                                                <span className="text-[10px] text-slate-400 font-normal mr-1">已付</span>
+                                                                {Math.round(t.payers[myPersonId]).toLocaleString()}
+                                                            </div>
+                                                        )}
+                                                        {myShare > 0 && (
+                                                            <div className="text-xs text-indigo-600 font-bold mt-0.5">
+                                                                <span className="text-[10px] text-slate-400 font-normal mr-1">自付</span>
+                                                                {Math.round(myShare).toLocaleString()}
+                                                            </div>
+                                                        )}
+                                                        {myShare <= 0 && t.payers?.[myPersonId] > 0 && (
+                                                            <div className="text-xs text-sky-600 font-bold mt-0.5">
+                                                                <span className="text-[10px] text-slate-400 font-normal mr-1">已付</span>
+                                                                {Math.round(t.payers[myPersonId]).toLocaleString()}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex flex-col gap-1">
+                                                        <button onClick={() => onEdit(t)} className="text-slate-300 hover:text-indigo-500 p-1"><Edit size={14} /></button>
+                                                        <button onClick={() => onDelete(t.id)} className="text-slate-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    );})}
-                    {viewMode === 'list' && (
-                        <div className="pb-4 mt-2">
-                            {displayLimit < filtered.length ? (
-                                <div ref={observerTarget} className="h-10 w-full flex items-center justify-center">
-                                    <div className="text-slate-400 text-xs">載入更多...</div>
+                                        );
+                                    })}
                                 </div>
-                            ) : (
-                                hasMoreDB && (
-                                    <button onClick={onLoadMoreDB} className="w-full py-4 text-center text-sm font-bold text-indigo-600 bg-indigo-50 rounded-xl hover:bg-indigo-100 transition-colors">
-                                        載入更早的雲端紀錄 (目前已載入 {(transactions || []).length} 筆)
-                                    </button>
-                                )
-                            )}
+                            </div>
+                        );
+                    })}
+                    {viewMode === 'list' && (
+                        <div ref={observerTarget} className="h-10 w-full flex items-center justify-center">
+                            {displayLimit < filtered.length && <div className="text-slate-400 text-xs">載入更多...</div>}
                         </div>
                     )}
                 </div>
