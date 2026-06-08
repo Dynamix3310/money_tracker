@@ -131,7 +131,7 @@ export const AddRecurringModal = ({ userId, groupId, people, categories, onClose
 }
 
 // --- Settings ---
-export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, currentGroupId, groups, user, categories: rawCategories, onAddCategory, onDeleteCategory, onUpdateCategory, onGroupJoin, onGroupCreate, onGroupSwitch, currentTheme, onSetTheme, enableSuccessAnimation, onToggleSuccessAnimation }: any) => {
+export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, currentGroupId, groups, user, categories: rawCategories, onAddCategory, onDeleteCategory, onUpdateCategory, onGroupJoin, onGroupCreate, onGroupSwitch, currentTheme, onSetTheme, successAnimationType, onSetAnimationType }: any) => {
     const [activeTab, setActiveTab] = useState('ledger');
     const [newCat, setNewCat] = useState('');
     const [catType, setCatType] = useState<'expense' | 'income'>('expense');
@@ -252,8 +252,15 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
                         <div className="border-t border-slate-100 pt-4">
                             <label className={styles.label}>動畫設定</label>
                             <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
-                                <span className="text-sm font-bold text-slate-700">記帳成功彩帶動畫</span>
-                                <input type="checkbox" checked={enableSuccessAnimation} onChange={onToggleSuccessAnimation} className="w-5 h-5 accent-indigo-600" />
+                                <span className="text-sm font-bold text-slate-700">記帳成功動畫</span>
+                                <select value={successAnimationType} onChange={e => onSetAnimationType(e.target.value)} className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm outline-none font-bold text-slate-600">
+                                    <option value="none">無 (關閉)</option>
+                                    <option value="confetti">彩帶灑落</option>
+                                    <option value="fireworks">煙火</option>
+                                    <option value="stars">星星</option>
+                                    <option value="side">雙邊彩炮</option>
+                                    <option value="random">隨機驚喜</option>
+                                </select>
                             </div>
                         </div>
                     </div>
@@ -369,7 +376,7 @@ export const PortfolioRebalanceModal = ({ holdings, platforms, rates, baseCurren
 };
 
 // --- AddTransactionModal (With Auto-Balancing) ---
-export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData, rates, convert, accounts, enableSuccessAnimation }: any) => {
+export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData, rates, convert, accounts, successAnimationType }: any) => {
     const [type, setType] = useState<'expense' | 'income'>(editData?.type || 'expense');
     const [amount, setAmount] = useState(editData?.sourceAmount?.toString() || editData?.totalAmount?.toString() || '');
     const [currency, setCurrency] = useState(editData?.sourceCurrency || editData?.currency || 'TWD');
@@ -492,12 +499,42 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
             await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), { name: description, amount: finalAmt, type, category, payerId: mainPayerId, payers, splitDetails: splits, frequency: 'monthly', active: true, nextDate: Timestamp.fromDate(nm) });
         }
 
-        if (!editData && enableSuccessAnimation) {
-            confetti({
-                particleCount: 100,
-                spread: 70,
-                origin: { y: 0.6 }
-            });
+        if (!editData && successAnimationType !== 'none') {
+            const types = ['confetti', 'fireworks', 'stars', 'side'];
+            const selectedType = successAnimationType === 'random' ? types[Math.floor(Math.random() * types.length)] : successAnimationType;
+
+            if (selectedType === 'confetti') {
+                confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+            } else if (selectedType === 'fireworks') {
+                const duration = 1.5 * 1000;
+                const animationEnd = Date.now() + duration;
+                const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 100 };
+                const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
+                const interval: any = setInterval(function() {
+                    const timeLeft = animationEnd - Date.now();
+                    if (timeLeft <= 0) return clearInterval(interval);
+                    const particleCount = 50 * (timeLeft / duration);
+                    confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+                    confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+                }, 250);
+            } else if (selectedType === 'stars') {
+                const defaults = { spread: 360, ticks: 50, gravity: 0, decay: 0.94, startVelocity: 30, shapes: ['star' as any], colors: ['FFE400', 'FFBD00', 'E89400', 'FFCA6C', 'FDFFB8'], zIndex: 100 };
+                const shoot = () => {
+                    confetti({ ...defaults, particleCount: 40, scalar: 1.2, shapes: ['star' as any] });
+                    confetti({ ...defaults, particleCount: 10, scalar: 0.75, shapes: ['circle' as any] });
+                };
+                setTimeout(shoot, 0);
+                setTimeout(shoot, 100);
+                setTimeout(shoot, 200);
+            } else if (selectedType === 'side') {
+                const end = Date.now() + (1.5 * 1000);
+                const frame = () => {
+                    confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, zIndex: 100 });
+                    confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 }, zIndex: 100 });
+                    if (Date.now() < end) requestAnimationFrame(frame);
+                };
+                frame();
+            }
         }
         onClose();
     };
