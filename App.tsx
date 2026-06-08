@@ -277,38 +277,7 @@ export default function App() {
       return () => { privateUnsubs.forEach(u => u()); };
    }, [activeUid]);
 
-   // Temporary cleanup to remove duplicated history documents caused by the infinite loop bug
-   useEffect(() => {
-      if (!activeUid || !db) return;
-      const cleanupDuplicates = async () => {
-         try {
-            const { getDocs } = await import('firebase/firestore');
-            const snap = await getDocs(collection(db, getCollectionPath(activeUid, null, 'history')));
-            const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            const grouped: Record<string, any[]> = {};
-            docs.forEach(d => {
-               const dateStr = safeDate(d.date);
-               if (dateStr) {
-                  if (!grouped[dateStr]) grouped[dateStr] = [];
-                  grouped[dateStr].push(d);
-               }
-            });
-            for (const dateStr of Object.keys(grouped)) {
-               const items = grouped[dateStr];
-               if (items.length > 1) {
-                  // Keep the first one (we can sort by timestamp desc, but any one is fine as they are identical)
-                  items.sort((a, b) => (b.date?.seconds || 0) - (a.date?.seconds || 0));
-                  for (let i = 1; i < items.length; i++) {
-                     await deleteDoc(doc(db, getCollectionPath(activeUid, null, 'history'), items[i].id));
-                  }
-               }
-            }
-         } catch (e) {
-            console.error("Cleanup error", e);
-         }
-      };
-      cleanupDuplicates();
-   }, [activeUid]);
+
 
    useEffect(() => {
       if (!activeUid || !db || !currentGroupId) return;
