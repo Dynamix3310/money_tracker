@@ -372,15 +372,15 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     const [payerMode, setPayerMode] = useState<'single' | 'multi'>('single');
     const [splitMode, setSplitMode] = useState<'equal' | 'custom' | 'single'>('single');
     const [isRecurring, setIsRecurring] = useState(false);
-    const [mainPayerId, setMainPayerId] = useState(editData ? Object.keys(editData.payers)[0] : (people.find((p: any) => p.isMe || p.uid === auth.currentUser?.uid)?.id || people[0]?.id || ''));
-    const [singleSplitPayerId, setSingleSplitPayerId] = useState(editData ? Object.keys(editData.splitDetails).find(k => editData.splitDetails[k] > 0) || '' : ''); // Who pays 100% in single split mode
-    const [multiPayers, setMultiPayers] = useState<Record<string, string>>(editData && Object.keys(editData.payers).length > 1 ? Object.fromEntries(Object.entries(editData.payers).map(([k, v]: any) => [k, v.toString()])) : {});
-    const [customSplits, setCustomSplits] = useState<Record<string, string>>(editData && editData.splitDetails ? Object.fromEntries(Object.entries(editData.splitDetails).map(([k, v]: any) => [k, v.toString()])) : {});
+    const [mainPayerId, setMainPayerId] = useState(editData?.payers ? Object.keys(editData.payers)[0] : (people.find((p: any) => p.isMe || p.uid === auth.currentUser?.uid)?.id || people[0]?.id || ''));
+    const [singleSplitPayerId, setSingleSplitPayerId] = useState(editData?.splitDetails ? Object.keys(editData.splitDetails).find(k => editData.splitDetails[k] > 0) || '' : ''); // Who pays 100% in single split mode
+    const [multiPayers, setMultiPayers] = useState<Record<string, string>>(editData?.payers && Object.keys(editData.payers).length > 1 ? Object.fromEntries(Object.entries(editData.payers).map(([k, v]: any) => [k, v.toString()])) : {});
+    const [customSplits, setCustomSplits] = useState<Record<string, string>>(editData?.splitDetails ? Object.fromEntries(Object.entries(editData.splitDetails).map(([k, v]: any) => [k, v.toString()])) : {});
     const [loadingAI, setLoadingAI] = useState(false);
     const [isFromBank, setIsFromBank] = useState(!!editData?.linkedBankAccountId);
     const [selectedAccountId, setSelectedAccountId] = useState(editData?.linkedBankAccountId || (accounts?.length ? accounts[0].id : ''));
 
-    useEffect(() => { if (editData) { if (Object.keys(editData.payers).length > 1) setPayerMode('multi'); const values: number[] = Object.values(editData.splitDetails); if (values.length > 0 && (Math.max(...values) - Math.min(...values) > 1)) setSplitMode('custom'); } }, []);
+    useEffect(() => { if (editData) { if (editData.payers && Object.keys(editData.payers).length > 1) setPayerMode('multi'); const values: number[] = editData.splitDetails ? Object.values(editData.splitDetails) : []; if (values.length > 0 && (Math.max(...values) - Math.min(...values) > 1)) setSplitMode('custom'); } }, []);
     const currentCats = useMemo(() => categories.filter((c: any) => c.type === type).sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [categories, type]);
     useEffect(() => { if (currentCats.length > 0 && !category) setCategory(currentCats[0].name); }, [type, categories]);
 
