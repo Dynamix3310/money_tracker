@@ -5,6 +5,7 @@ import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog,
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc, getDocs, query, orderBy, where, increment, getDoc, writeBatch } from 'firebase/firestore';
 import { db, getCollectionPath, auth, getUserProfilePath } from '../services/firebase';
 import { callGemini } from '../services/gemini';
+import confetti from 'canvas-confetti';
 
 const styles = {
     overlay: "fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200",
@@ -130,7 +131,7 @@ export const AddRecurringModal = ({ userId, groupId, people, categories, onClose
 }
 
 // --- Settings ---
-export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, currentGroupId, groups, user, categories: rawCategories, onAddCategory, onDeleteCategory, onUpdateCategory, onGroupJoin, onGroupCreate, onGroupSwitch, currentTheme, onSetTheme }: any) => {
+export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, currentGroupId, groups, user, categories: rawCategories, onAddCategory, onDeleteCategory, onUpdateCategory, onGroupJoin, onGroupCreate, onGroupSwitch, currentTheme, onSetTheme, enableSuccessAnimation, onToggleSuccessAnimation }: any) => {
     const [activeTab, setActiveTab] = useState('ledger');
     const [newCat, setNewCat] = useState('');
     const [catType, setCatType] = useState<'expense' | 'income'>('expense');
@@ -248,6 +249,13 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
                                 ))}
                             </div>
                         </div>
+                        <div className="border-t border-slate-100 pt-4">
+                            <label className={styles.label}>動畫設定</label>
+                            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                <span className="text-sm font-bold text-slate-700">記帳成功彩帶動畫</span>
+                                <input type="checkbox" checked={enableSuccessAnimation} onChange={onToggleSuccessAnimation} className="w-5 h-5 accent-indigo-600" />
+                            </div>
+                        </div>
                     </div>
                 )}
                 {activeTab === 'keys' && (
@@ -361,7 +369,7 @@ export const PortfolioRebalanceModal = ({ holdings, platforms, rates, baseCurren
 };
 
 // --- AddTransactionModal (With Auto-Balancing) ---
-export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData, rates, convert, accounts }: any) => {
+export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData, rates, convert, accounts, enableSuccessAnimation }: any) => {
     const [type, setType] = useState<'expense' | 'income'>(editData?.type || 'expense');
     const [amount, setAmount] = useState(editData?.sourceAmount?.toString() || editData?.totalAmount?.toString() || '');
     const [currency, setCurrency] = useState(editData?.sourceCurrency || editData?.currency || 'TWD');
@@ -482,6 +490,14 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
         if (isRecurring && !editData) {
             const nm = new Date(date); nm.setMonth(nm.getMonth() + 1);
             await addDoc(collection(db, getCollectionPath(userId, groupId, 'recurring')), { name: description, amount: finalAmt, type, category, payerId: mainPayerId, payers, splitDetails: splits, frequency: 'monthly', active: true, nextDate: Timestamp.fromDate(nm) });
+        }
+
+        if (!editData && enableSuccessAnimation) {
+            confetti({
+                particleCount: 100,
+                spread: 70,
+                origin: { y: 0.6 }
+            });
         }
         onClose();
     };
