@@ -51,7 +51,7 @@ export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlat
 };
 
 // --- Ledger View ---
-export const LedgerView = ({ transactions, categories: rawCategories, people, onAdd, onBatchAdd, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring }: any) => {
+export const LedgerView = ({ transactions, categories: rawCategories, people, onAdd, onBatchAdd, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring, hasMoreDB, onLoadMoreDB }: any) => {
     const categories = useMemo(() => [...rawCategories].sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [rawCategories]);
     const [viewMode, setViewMode] = useState<'list' | 'stats' | 'debts' | 'budget'>('list');
     const [searchTerm, setSearchTerm] = useState('');
