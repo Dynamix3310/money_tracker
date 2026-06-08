@@ -259,6 +259,12 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
                                     <option value="fireworks">煙火</option>
                                     <option value="stars">星星</option>
                                     <option value="side">雙邊彩炮</option>
+                                    <option value="snow">雪花飄落</option>
+                                    <option value="money">發大財 (金幣鈔票)</option>
+                                    <option value="hearts">滿滿愛心</option>
+                                    <option value="bubbles">漂浮泡泡</option>
+                                    <option value="explosion">大爆炸</option>
+                                    <option value="fountain">彩帶噴泉</option>
                                     <option value="random">隨機驚喜</option>
                                 </select>
                             </div>
@@ -500,16 +506,16 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
         }
 
         if (!editData && successAnimationType !== 'none') {
-            const types = ['confetti', 'fireworks', 'stars', 'side'];
+            const types = ['confetti', 'fireworks', 'stars', 'side', 'snow', 'money', 'hearts', 'bubbles', 'explosion', 'fountain'];
             const selectedType = successAnimationType === 'random' ? types[Math.floor(Math.random() * types.length)] : successAnimationType;
+            const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
 
             if (selectedType === 'confetti') {
-                confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+                confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, zIndex: 100 });
             } else if (selectedType === 'fireworks') {
                 const duration = 1.5 * 1000;
                 const animationEnd = Date.now() + duration;
                 const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 100 };
-                const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
                 const interval: any = setInterval(function() {
                     const timeLeft = animationEnd - Date.now();
                     if (timeLeft <= 0) return clearInterval(interval);
@@ -523,14 +529,60 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                     confetti({ ...defaults, particleCount: 40, scalar: 1.2, shapes: ['star' as any] });
                     confetti({ ...defaults, particleCount: 10, scalar: 0.75, shapes: ['circle' as any] });
                 };
-                setTimeout(shoot, 0);
-                setTimeout(shoot, 100);
-                setTimeout(shoot, 200);
+                setTimeout(shoot, 0); setTimeout(shoot, 100); setTimeout(shoot, 200);
             } else if (selectedType === 'side') {
                 const end = Date.now() + (1.5 * 1000);
                 const frame = () => {
                     confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, zIndex: 100 });
                     confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 }, zIndex: 100 });
+                    if (Date.now() < end) requestAnimationFrame(frame);
+                };
+                frame();
+            } else if (selectedType === 'snow') {
+                const duration = 3 * 1000;
+                const animationEnd = Date.now() + duration;
+                let skew = 1;
+                const frame = () => {
+                    const timeLeft = animationEnd - Date.now();
+                    const ticks = Math.max(200, 500 * (timeLeft / duration));
+                    skew = Math.max(0.8, skew - 0.001);
+                    confetti({
+                        particleCount: 1, startVelocity: 0, ticks: ticks,
+                        origin: { x: Math.random(), y: (Math.random() * skew) - 0.2 },
+                        colors: ['#ffffff', '#e2e8f0', '#cbd5e1'], shapes: ['circle'],
+                        gravity: randomInRange(0.4, 0.6), scalar: randomInRange(0.4, 1),
+                        drift: randomInRange(-0.4, 0.4), zIndex: 100
+                    });
+                    if (timeLeft > 0) requestAnimationFrame(frame);
+                };
+                frame();
+            } else if (selectedType === 'money') {
+                const c = confetti as any;
+                const dollar = c.shapeFromText ? c.shapeFromText({ text: '💵', scalar: 2 }) : 'circle';
+                const coin = c.shapeFromText ? c.shapeFromText({ text: '🪙', scalar: 2 }) : 'circle';
+                const bag = c.shapeFromText ? c.shapeFromText({ text: '💰', scalar: 2 }) : 'circle';
+                confetti({ particleCount: 50, spread: 100, origin: { y: 0.6 }, shapes: [dollar, coin, bag], scalar: 2, zIndex: 100 });
+            } else if (selectedType === 'hearts') {
+                const heart = (confetti as any).shapeFromText ? (confetti as any).shapeFromText({ text: '❤️', scalar: 2 }) : 'circle';
+                confetti({ particleCount: 60, spread: 90, origin: { y: 0.6 }, shapes: [heart], scalar: 2, zIndex: 100 });
+            } else if (selectedType === 'bubbles') {
+                const duration = 2 * 1000;
+                const animationEnd = Date.now() + duration;
+                const interval: any = setInterval(function() {
+                    const timeLeft = animationEnd - Date.now();
+                    if (timeLeft <= 0) return clearInterval(interval);
+                    confetti({
+                        particleCount: 4, startVelocity: randomInRange(10, 20), angle: randomInRange(80, 100), spread: 20,
+                        origin: { x: randomInRange(0.1, 0.9), y: 1 }, colors: ['#bae6fd', '#7dd3fc', '#38bdf8', '#e0f2fe'],
+                        shapes: ['circle'], gravity: -0.15, scalar: randomInRange(0.5, 1.5), zIndex: 100
+                    });
+                }, 100);
+            } else if (selectedType === 'explosion') {
+                confetti({ particleCount: 250, spread: 180, startVelocity: 60, origin: { y: 0.5 }, zIndex: 100 });
+            } else if (selectedType === 'fountain') {
+                const end = Date.now() + (2 * 1000);
+                const frame = () => {
+                    confetti({ particleCount: 6, angle: 90, spread: 25, origin: { x: 0.5, y: 1 }, startVelocity: 55, zIndex: 100 });
                     if (Date.now() < end) requestAnimationFrame(frame);
                 };
                 frame();
