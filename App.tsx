@@ -88,6 +88,7 @@ export default function App() {
    const [cardLogs, setCardLogs] = useState<CreditCardLog[]>(() => loadCache('cached_cardLogs', []));
    const [historyData, setHistoryData] = useState<NetWorthHistory[]>(() => loadCache('cached_history', []));
    const [transactions, setTransactions] = useState<Transaction[]>(() => loadCache('cached_transactions', []));
+   const [transactionLimit, setTransactionLimit] = useState(500);
    const [people, setPeople] = useState<Person[]>(() => loadCache('cached_people', []));
    const [categories, setCategories] = useState<Category[]>(() => loadCache('cached_categories', []));
    const [recurringRules, setRecurringRules] = useState<RecurringRule[]>(() => loadCache('cached_recurring', []));
@@ -274,10 +275,9 @@ export default function App() {
       setDataReady(false);
       let firstResponse = false;
 
-      const groupCols = ['transactions', 'people', 'categories', 'recurring'];
-      const groupUnsubs = groupCols.map(c => onSnapshot(c === 'transactions' ? query(collection(db, getCollectionPath(activeUid, currentGroupId, c)), orderBy('date', 'desc'), limit(500)) : collection(db, getCollectionPath(activeUid, currentGroupId, c)), s => {
+      const groupCols = ['people', 'categories', 'recurring'];
+      const groupUnsubs = groupCols.map(c => onSnapshot(collection(db, getCollectionPath(activeUid, currentGroupId, c)), s => {
          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-         if (c === 'transactions') { setTransactions(data as Transaction[]); try { localStorage.setItem('cached_transactions', JSON.stringify(data.slice(0, 200))); } catch { } }
          if (c === 'people') { setPeople(data as Person[]); try { localStorage.setItem('cached_people', JSON.stringify(data)); } catch { } }
          if (c === 'categories') { setCategories(data as Category[]); try { localStorage.setItem('cached_categories', JSON.stringify(data)); } catch { } }
          if (c === 'recurring') { setRecurringRules(data as RecurringRule[]); try { localStorage.setItem('cached_recurring', JSON.stringify(data)); } catch { } }
@@ -285,6 +285,22 @@ export default function App() {
       }));
       return () => { groupUnsubs.forEach(u => u()); };
    }, [activeUid, currentGroupId]);
+
+   useEffect(() => {
+      if (!activeUid || !db || !currentGroupId) return;
+      const unsub = onSnapshot(query(collection(db, getCollectionPath(activeUid, currentGroupId, 'transactions')), orderBy('date', 'desc'), limit(transactionLimit)), s => {
+         const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+         setTransactions(data as Transaction[]);
+         try { localStorage.setItem('cached_transactions', JSON.stringify(data.slice(0, 200))); } catch { }
+      });
+      return () => unsub();
+   }, [activeUid, currentGroupId, transactionLimit]);
+
+   const handleLoadMoreTransactions = () => {
+      if (transactions.length >= transactionLimit) {
+         setTransactionLimit(prev => prev + 500);
+      }
+   };
 
    const calculatedAccounts = useMemo(() => accounts.map(acc => {
       const logs = bankLogs.filter(l => l.accountId === acc.id);
@@ -495,7 +511,7 @@ export default function App() {
                   </div>
                )}
                {dataReady && activeTab === 'invest' && <PortfolioView holdings={holdings} platforms={platforms} onAddPlatform={() => setActiveModal('add-platform')} onManagePlatform={() => setActiveModal('manage-platforms')} onManageCash={(p: any) => { setSelectedItem(p); setActiveModal('manage-cash') }} onAddAsset={() => setActiveModal('add-asset')} onUpdatePrices={() => updateAssetPrices(true)} onEdit={(h: any) => { setSelectedItem(h); setActiveModal('edit-asset-price') }} onSell={(h: any) => { setSelectedItem(h); setActiveModal('sell') }} onDividend={() => setActiveModal('add-dividend')} onRebalance={() => setActiveModal('rebalance')} baseCurrency={baseCurrency} rates={rates} convert={convert} CURRENCY_SYMBOLS={CURRENCY_SYMBOLS} />}
-               {dataReady && activeTab === 'ledger' && <LedgerView transactions={transactions} categories={categories} people={people} cardLogs={cardLogs} onAdd={() => setActiveModal('add-trans')} onEdit={(t: any) => { setSelectedItem(t); setActiveModal('edit-trans') }} currentGroupId={currentGroupId} userId={user?.uid} onDelete={(id: string) => confirmDelete(async () => { const t = transactions.find(tx => tx.id === id); if (t?.linkedBankTransactionId) { await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'bankLogs'), t.linkedBankTransactionId)); } await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'transactions'), id)); }, '確定刪除此筆記帳資料?')} onManageRecurring={() => setActiveModal('manage-recurring')} onBatchAdd={() => setActiveModal('ai-batch')} />}
+               {dataReady && activeTab === 'ledger' && <LedgerView transactions={transactions} categories={categories} people={people} cardLogs={cardLogs} onLoadMore={handleLoadMoreTransactions} onAdd={() => setActiveModal('add-trans')} onEdit={(t: any) => { setSelectedItem(t); setActiveModal('edit-trans') }} currentGroupId={currentGroupId} userId={user?.uid} onDelete={(id: string) => confirmDelete(async () => { const t = transactions.find(tx => tx.id === id); if (t?.linkedBankTransactionId) { await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'bankLogs'), t.linkedBankTransactionId)); } await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'transactions'), id)); }, '確定刪除此筆記帳資料?')} onManageRecurring={() => setActiveModal('manage-recurring')} onBatchAdd={() => setActiveModal('ai-batch')} />}
                {dataReady && activeTab === 'cash' && <CashView accounts={calculatedAccounts} creditCards={creditCards} onTransfer={() => setActiveModal('transfer')} onAddAccount={() => setActiveModal('add-account')} onManageAccount={() => setActiveModal('manage-accounts')} onAddCard={() => setActiveModal('add-card')} onManageCard={() => setActiveModal('manage-cards')} onViewAccount={(acc: any) => { setSelectedItem(acc); setActiveModal('view-bank') }} onViewCard={(card: any) => { setSelectedItem(card); setActiveModal('view-card') }} />}
             </div>
          </main>

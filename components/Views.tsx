@@ -51,7 +51,7 @@ export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlat
 };
 
 // --- Ledger View ---
-export const LedgerView = ({ transactions, categories: rawCategories, people, onAdd, onBatchAdd, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring }: any) => {
+export const LedgerView = ({ transactions, categories: rawCategories, people, onAdd, onBatchAdd, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring, onLoadMore }: any) => {
     const categories = useMemo(() => [...rawCategories].sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [rawCategories]);
     const [viewMode, setViewMode] = useState<'list' | 'stats' | 'debts' | 'budget'>('list');
     const [searchTerm, setSearchTerm] = useState('');
@@ -72,6 +72,12 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
         if (observerTarget.current) observer.observe(observerTarget.current);
         return () => observer.disconnect();
     }, [viewMode]);
+
+    useEffect(() => {
+        if (onLoadMore && displayLimit + 100 >= transactions.length) {
+            onLoadMore();
+        }
+    }, [displayLimit, transactions.length, onLoadMore]);
 
     const linkedIds = useMemo(() => new Set(cardLogs.filter((c: any) => c.isReconciled && c.linkedTransactionId).map((c: any) => c.linkedTransactionId)), [cardLogs]);
 
