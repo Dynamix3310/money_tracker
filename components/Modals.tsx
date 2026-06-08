@@ -265,6 +265,16 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
                                     <option value="bubbles">漂浮泡泡</option>
                                     <option value="explosion">大爆炸</option>
                                     <option value="fountain">彩帶噴泉</option>
+                                    <option value="poop">吃土了 💩💸</option>
+                                    <option value="clown">小丑是我 🤡💳</option>
+                                    <option value="crying">錢錢飛走 😭💸</option>
+                                    <option value="pig">養豬公 🐷🪙</option>
+                                    <option value="ghost">窮鬼退散 👻⚔️</option>
+                                    <option value="alien">外星人劫財 👽🛸</option>
+                                    <option value="burger">吃貨報到 🍔🍟</option>
+                                    <option value="ninja">花錢如流水 🥷💨</option>
+                                    <option value="monkey">不願面對 🙈🧾</option>
+                                    <option value="zombie">月光族 🧟🦴</option>
                                     <option value="random">隨機驚喜</option>
                                 </select>
                             </div>
@@ -506,7 +516,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
         }
 
         if (!editData && successAnimationType !== 'none') {
-            const types = ['confetti', 'fireworks', 'stars', 'side', 'snow', 'money', 'hearts', 'bubbles', 'explosion', 'fountain'];
+            const types = ['confetti', 'fireworks', 'stars', 'side', 'snow', 'money', 'hearts', 'bubbles', 'explosion', 'fountain', 'poop', 'clown', 'crying', 'pig', 'ghost', 'alien', 'burger', 'ninja', 'monkey', 'zombie'];
             const selectedType = successAnimationType === 'random' ? types[Math.floor(Math.random() * types.length)] : successAnimationType;
             const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
 
@@ -586,6 +596,57 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                     if (Date.now() < end) requestAnimationFrame(frame);
                 };
                 frame();
+            } else if (selectedType === 'poop') {
+                const c = confetti as any;
+                const poop = c.shapeFromText ? c.shapeFromText({ text: '💩', scalar: 3 }) : 'circle';
+                const moneyWing = c.shapeFromText ? c.shapeFromText({ text: '💸', scalar: 2 }) : 'circle';
+                confetti({ particleCount: 40, spread: 120, origin: { y: 0.6 }, shapes: [poop, moneyWing], scalar: 2, zIndex: 100 });
+            } else if (selectedType === 'clown') {
+                const c = confetti as any;
+                const clown = c.shapeFromText ? c.shapeFromText({ text: '🤡', scalar: 3 }) : 'circle';
+                const card = c.shapeFromText ? c.shapeFromText({ text: '💳', scalar: 2 }) : 'circle';
+                confetti({ particleCount: 40, spread: 100, origin: { y: 0.6 }, shapes: [clown, card], scalar: 2, zIndex: 100 });
+            } else if (selectedType === 'crying') {
+                const c = confetti as any;
+                const cry = c.shapeFromText ? c.shapeFromText({ text: '😭', scalar: 3 }) : 'circle';
+                const moneyWing = c.shapeFromText ? c.shapeFromText({ text: '💸', scalar: 2 }) : 'circle';
+                confetti({ particleCount: 50, spread: 100, gravity: 0.8, origin: { y: 0.6 }, shapes: [cry, moneyWing], scalar: 2, zIndex: 100 });
+            } else if (selectedType === 'pig') {
+                const c = confetti as any;
+                const pig = c.shapeFromText ? c.shapeFromText({ text: '🐷', scalar: 3 }) : 'circle';
+                const coin = c.shapeFromText ? c.shapeFromText({ text: '🪙', scalar: 2 }) : 'circle';
+                confetti({ particleCount: 50, spread: 90, startVelocity: 40, origin: { y: 0.6 }, shapes: [pig, coin], scalar: 2, zIndex: 100 });
+            } else if (selectedType === 'ghost') {
+                const c = confetti as any;
+                const ghost = c.shapeFromText ? c.shapeFromText({ text: '👻', scalar: 3 }) : 'circle';
+                const cross = c.shapeFromText ? c.shapeFromText({ text: '❌', scalar: 2 }) : 'circle';
+                confetti({ particleCount: 40, spread: 120, origin: { y: 0.6 }, shapes: [ghost, cross], scalar: 2, zIndex: 100, drift: 1 });
+            } else if (selectedType === 'alien') {
+                const c = confetti as any;
+                const alien = c.shapeFromText ? c.shapeFromText({ text: '👽', scalar: 3 }) : 'circle';
+                const ufo = c.shapeFromText ? c.shapeFromText({ text: '🛸', scalar: 3 }) : 'circle';
+                confetti({ particleCount: 40, spread: 100, origin: { y: 0.6 }, shapes: [alien, ufo], scalar: 2, zIndex: 100, gravity: -0.2 });
+            } else if (selectedType === 'burger') {
+                const c = confetti as any;
+                const burger = c.shapeFromText ? c.shapeFromText({ text: '🍔', scalar: 3 }) : 'circle';
+                const fries = c.shapeFromText ? c.shapeFromText({ text: '🍟', scalar: 2 }) : 'circle';
+                const pizza = c.shapeFromText ? c.shapeFromText({ text: '🍕', scalar: 2 }) : 'circle';
+                confetti({ particleCount: 60, spread: 100, origin: { y: 0.6 }, shapes: [burger, fries, pizza], scalar: 2, zIndex: 100 });
+            } else if (selectedType === 'ninja') {
+                const c = confetti as any;
+                const ninja = c.shapeFromText ? c.shapeFromText({ text: '🥷', scalar: 3 }) : 'circle';
+                const smoke = c.shapeFromText ? c.shapeFromText({ text: '💨', scalar: 2 }) : 'circle';
+                confetti({ particleCount: 50, spread: 150, startVelocity: 50, origin: { y: 0.6 }, shapes: [ninja, smoke], scalar: 2, zIndex: 100 });
+            } else if (selectedType === 'monkey') {
+                const c = confetti as any;
+                const monkey = c.shapeFromText ? c.shapeFromText({ text: '🙈', scalar: 3 }) : 'circle';
+                const receipt = c.shapeFromText ? c.shapeFromText({ text: '🧾', scalar: 2 }) : 'circle';
+                confetti({ particleCount: 40, spread: 90, origin: { y: 0.6 }, shapes: [monkey, receipt], scalar: 2, zIndex: 100 });
+            } else if (selectedType === 'zombie') {
+                const c = confetti as any;
+                const zombie = c.shapeFromText ? c.shapeFromText({ text: '🧟', scalar: 3 }) : 'circle';
+                const bone = c.shapeFromText ? c.shapeFromText({ text: '🦴', scalar: 2 }) : 'circle';
+                confetti({ particleCount: 40, spread: 80, origin: { y: 0.6 }, shapes: [zombie, bone], scalar: 2, zIndex: 100, startVelocity: 20 });
             }
         }
         onClose();
