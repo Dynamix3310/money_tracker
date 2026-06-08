@@ -52,7 +52,7 @@ export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlat
 
 // --- Ledger View ---
 export const LedgerView = ({ transactions, categories: rawCategories, people, onAdd, onBatchAdd, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring, hasMoreDB, onLoadMoreDB }: any) => {
-    const categories = useMemo(() => [...rawCategories].sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [rawCategories]);
+    const categories = useMemo(() => [...(rawCategories || [])].sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [rawCategories]);
     const [viewMode, setViewMode] = useState<'list' | 'stats' | 'debts' | 'budget'>('list');
     const [searchTerm, setSearchTerm] = useState('');
     const [timeRange, setTimeRange] = useState<'week' | 'month' | 'lastMonth' | 'year' | 'custom'>('month');
@@ -72,10 +72,10 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
         if (node) observer.current.observe(node);
     }, []);
 
-    const linkedIds = useMemo(() => new Set(cardLogs.filter((c: any) => c.isReconciled && c.linkedTransactionId).map((c: any) => c.linkedTransactionId)), [cardLogs]);
+    const linkedIds = useMemo(() => new Set((cardLogs || []).filter((c: any) => c.isReconciled && c.linkedTransactionId).map((c: any) => c.linkedTransactionId)), [cardLogs]);
 
     const myPersonId = useMemo(() => {
-        return people.find((p: any) => p.uid === userId || p.isMe)?.id;
+        return (people || []).find((p: any) => p.uid === userId || p.isMe)?.id;
     }, [people, userId]);
 
     const getDateRange = () => {
@@ -121,8 +121,8 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
     const { start: filterStart, end: filterEnd } = useMemo(getDateRange, [timeRange, customStart, customEnd]);
 
     const filtered = useMemo(() => {
-        return transactions.filter((t: any) => {
-            const matchSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase()) || t.category.includes(searchTerm);
+        return (transactions || []).filter((t: any) => {
+            const matchSearch = (t.description || '').toLowerCase().includes(searchTerm.toLowerCase()) || (t.category || '').includes(searchTerm);
 
             if (viewMode === 'stats') {
                 if (!t.date?.seconds) return false;
@@ -149,8 +149,8 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
 
     const debtData = useMemo(() => {
         const balances: Record<string, number> = {};
-        people.forEach((p: any) => balances[p.id] = 0);
-        transactions.forEach((t: any) => {
+        (people || []).forEach((p: any) => balances[p.id] = 0);
+        (transactions || []).forEach((t: any) => {
             if (t.type === 'expense') {
                 Object.entries(t.payers).forEach(([pid, amount]: any) => { balances[pid] = (balances[pid] || 0) + amount; });
                 Object.entries(t.splitDetails).forEach(([pid, amount]: any) => { balances[pid] = (balances[pid] || 0) - amount; });
