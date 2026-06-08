@@ -50,6 +50,91 @@ export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlat
     );
 };
 
+// --- Helper Functions for Ledger ---
+const getTransactionIcon = (category: string, description: string) => {
+    const desc = (description || '').toLowerCase();
+    
+    // Food & Drink
+    if (desc.includes('珍奶') || desc.includes('飲料') || desc.includes('紅茶') || desc.includes('綠茶') || desc.includes('奶茶')) return '🧋';
+    if (desc.includes('咖啡') || desc.includes('coffee')) return '☕';
+    if (desc.includes('麥當勞') || desc.includes('漢堡') || desc.includes('速食')) return '🍔';
+    if (desc.includes('便當') || desc.includes('自助餐')) return '🍱';
+    if (desc.includes('早餐')) return '🥪';
+    if (desc.includes('午餐') || desc.includes('晚餐') || desc.includes('學餐')) return '🍽️';
+    if (desc.includes('麵')) return '🍜';
+    if (desc.includes('水餃') || desc.includes('鍋貼')) return '🥟';
+    if (desc.includes('火鍋')) return '🍲';
+    if (desc.includes('甜點') || desc.includes('蛋糕')) return '🍰';
+    if (desc.includes('冰') || desc.includes('奶昔')) return '🍦';
+    if (desc.includes('水果')) return '🍎';
+    if (desc.includes('菜') || desc.includes('超市') || desc.includes('全聯') || desc.includes('家樂福')) return '🛒';
+    
+    // Transport
+    if (desc.includes('捷運') || desc.includes('mrt')) return '🚇';
+    if (desc.includes('公車') || desc.includes('客運')) return '🚌';
+    if (desc.includes('計程車') || desc.includes('uber') || desc.includes('車資')) return '🚕';
+    if (desc.includes('高鐵') || desc.includes('火車')) return '🚆';
+    if (desc.includes('加油') || desc.includes('油錢')) return '⛽';
+    if (desc.includes('停車')) return '🅿️';
+    if (desc.includes('機票') || desc.includes('飛機')) return '✈️';
+    
+    // Shopping / Entertainment
+    if (desc.includes('衣服') || desc.includes('服飾')) return '👕';
+    if (desc.includes('鞋')) return '👞';
+    if (desc.includes('電影') || desc.includes('看戲')) return '🍿';
+    if (desc.includes('遊戲') || desc.includes('steam')) return '🎮';
+    if (desc.includes('書')) return '📚';
+    if (desc.includes('禮物')) return '🎁';
+    if (desc.includes('醫') || desc.includes('診所') || desc.includes('藥')) return '🏥';
+    if (desc.includes('剪髮') || desc.includes('理髮')) return '✂️';
+    if (desc.includes('貓') || desc.includes('狗') || desc.includes('寵物')) return '🐱';
+    
+    // Income / Finance
+    if (desc.includes('薪水') || desc.includes('工資')) return '💰';
+    if (desc.includes('股息') || desc.includes('利息')) return '📈';
+    if (desc.includes('獎金') || desc.includes('發票')) return '🧧';
+
+    // Fallback to Category
+    switch (category) {
+        case '飲食': case '食物': case '餐飲': return '🍽️';
+        case '交通': case '行': return '🚗';
+        case '購物': case '買東西': return '🛍️';
+        case '娛樂': case '玩樂': return '🎉';
+        case '居家': case '居住': case '住宿': case '住': return '🏠';
+        case '醫療': case '健康': return '💊';
+        case '教育': case '學習': return '📖';
+        case '水電': case '瓦斯': case '帳單': return '🧾';
+        case '通訊': case '網路': case '電話費': return '📱';
+        case '保險': return '🛡️';
+        case '投資': case '理財': return '📊';
+        case '薪水': case '收入': return '💵';
+        case '紅包': case '獎金': return '🧧';
+        case '轉帳': return '💸';
+        case '生活': case '雜支': return '🛒';
+        case '寵物': return '🐾';
+        case '其他': return '📝';
+        default: return category?.[0] || '💰';
+    }
+};
+
+const getCategoryBgColor = (category: string, type: string) => {
+    if (type === 'income') return 'bg-emerald-100 text-emerald-600';
+    
+    switch (category) {
+        case '飲食': case '食物': case '餐飲': return 'bg-orange-100 text-orange-600';
+        case '交通': case '行': return 'bg-blue-100 text-blue-600';
+        case '購物': case '買東西': return 'bg-pink-100 text-pink-600';
+        case '娛樂': case '玩樂': return 'bg-purple-100 text-purple-600';
+        case '居家': case '居住': case '住宿': case '住': return 'bg-teal-100 text-teal-600';
+        case '醫療': case '健康': return 'bg-red-100 text-red-600';
+        case '教育': case '學習': return 'bg-indigo-100 text-indigo-600';
+        case '水電': case '瓦斯': case '帳單': return 'bg-yellow-100 text-yellow-600';
+        case '通訊': case '網路': case '電話費': return 'bg-cyan-100 text-cyan-600';
+        case '投資': case '理財': return 'bg-green-100 text-green-600';
+        default: return 'bg-slate-100 text-slate-600';
+    }
+};
+
 // --- Ledger View ---
 export const LedgerView = ({ transactions, categories: rawCategories, people, onAdd, onBatchAdd, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring, onLoadMore }: any) => {
     const categories = useMemo(() => [...rawCategories].sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [rawCategories]);
@@ -270,8 +355,8 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
                                         return (
                                             <div key={t.id} className="bg-white px-4 py-3 rounded-xl border border-slate-100 flex justify-between items-center group">
                                                 <div className="flex gap-3 items-center">
-                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm ${t.type === 'income' ? 'bg-emerald-500' : 'bg-blue-500'} relative`}>
-                                                        {t.category?.[0]}
+                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${getCategoryBgColor(t.category, t.type)} relative`}>
+                                                        {getTransactionIcon(t.category, t.description)}
                                                         {linkedIds.has(t.id) && <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 border shadow-sm"><Link2 size={10} className="text-indigo-600" /></div>}
                                                     </div>
                                                     <div><div className="font-bold text-slate-800 text-sm">{t.description}</div><div className="text-[10px] text-slate-400">{t.date?.seconds ? new Date(t.date.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''} • {t.category} {t.isRecurring && '(自動)'}</div></div>
