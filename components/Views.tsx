@@ -61,17 +61,16 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
     const [statsFilter, setStatsFilter] = useState<string>('all'); // 'all' or personId
 
     const [displayLimit, setDisplayLimit] = useState(50);
-    const observerTarget = useRef(null);
-
-    useEffect(() => {
-        const observer = new IntersectionObserver((entries) => {
+    const observer = useRef<IntersectionObserver | null>(null);
+    const observerTarget = useCallback((node: any) => {
+        if (observer.current) observer.current.disconnect();
+        observer.current = new IntersectionObserver(entries => {
             if (entries[0].isIntersecting) {
                 setDisplayLimit(prev => prev + 50);
             }
         }, { threshold: 0.1 });
-        if (observerTarget.current) observer.observe(observerTarget.current);
-        return () => observer.disconnect();
-    }, [viewMode]);
+        if (node) observer.current.observe(node);
+    }, []);
 
     const linkedIds = useMemo(() => new Set(cardLogs.filter((c: any) => c.isReconciled && c.linkedTransactionId).map((c: any) => c.linkedTransactionId)), [cardLogs]);
 
@@ -273,7 +272,7 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
                                             <div className="flex items-center gap-2">
                                                 <div className="text-right">
                                                     <div className={`font-bold font-mono ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
-                                                        {t.type === 'income' ? '+' : ''}{t.totalAmount.toLocaleString()} <span className="text-xs font-normal text-slate-400">$</span>
+                                                        {t.type === 'income' ? '+' : ''}{(t.totalAmount || t.amount || 0).toLocaleString()} <span className="text-xs font-normal text-slate-400">$</span>
                                                     </div>
                                                     {myShare > 0 && t.payers?.[myPersonId] > 0 && (
                                                         <div className="text-xs text-sky-600 font-bold mt-0.5">
