@@ -31,8 +31,15 @@ const convert = (amount: number, from: string, to: string, rates: Record<string,
 };
 
 const safeDate = (dateObj: any) => {
-   if (dateObj && typeof dateObj === 'object' && dateObj.seconds) {
+   if (!dateObj) return '';
+   if (typeof dateObj === 'object' && dateObj.seconds) {
       return new Date(dateObj.seconds * 1000).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' });
+   }
+   if (typeof dateObj === 'string' || typeof dateObj === 'number') {
+      const d = new Date(dateObj);
+      if (!isNaN(d.getTime())) {
+          return d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' });
+      }
    }
    return '';
 };
