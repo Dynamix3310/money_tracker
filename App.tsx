@@ -254,7 +254,7 @@ export default function App() {
       const privateCols = ['platforms', 'holdings', 'accounts', 'bankLogs', 'creditCards', 'cardLogs', 'history'];
       const privateUnsubs = privateCols.map(c => {
          let q = collection(db, getCollectionPath(activeUid, null, c)) as any;
-         if (c === 'history') q = query(q, orderBy('date', 'desc'), limit(20));
+         if (c === 'history') q = query(q, orderBy('date', 'desc'), limit(180));
          if (c === 'bankLogs' || c === 'cardLogs') q = query(q, orderBy('date', 'desc'));
          return onSnapshot(q, s => {
             const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -264,7 +264,7 @@ export default function App() {
             if (c === 'bankLogs') { setBankLogs(data as BankTransaction[]); try { localStorage.setItem('cached_bankLogs', JSON.stringify(data.slice(0, 100))); } catch { } }
             if (c === 'creditCards') { setCreditCards(data as CreditCardInfo[]); try { localStorage.setItem('cached_creditCards', JSON.stringify(data)); } catch { } }
             if (c === 'cardLogs') { setCardLogs(data as CreditCardLog[]); try { localStorage.setItem('cached_cardLogs', JSON.stringify(data.slice(0, 100))); } catch { } }
-            if (c === 'history') { setHistoryData((data as NetWorthHistory[]).reverse()); try { localStorage.setItem('cached_history', JSON.stringify(data.slice(-30))); } catch { } }
+            if (c === 'history') { setHistoryData((data as NetWorthHistory[]).reverse()); try { localStorage.setItem('cached_history', JSON.stringify(data.slice(-180))); } catch { } }
          });
       });
       return () => { privateUnsubs.forEach(u => u()); };
@@ -332,7 +332,7 @@ export default function App() {
       }
    }, [activeUid, totalNetWorth, historyData, baseCurrency]);
 
-   const historyChartData = useMemo(() => historyData.map(h => ({ label: safeDate(h.date), value: h.amount })).slice(-14), [historyData]);
+   const historyChartData = useMemo(() => historyData.map(h => ({ label: safeDate(h.date), value: h.amount })).slice(-180), [historyData]);
    const cashFlowChartData = useMemo(() => getMonthlyCashFlow(transactions, baseCurrency, rates), [transactions, baseCurrency, rates]);
 
    const updateAssetPrices = async (showFeedback = true) => {
