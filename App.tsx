@@ -325,12 +325,23 @@ export default function App() {
       return investVal + platformCashVal + cashVal;
    }, [holdings, platforms, calculatedAccounts, baseCurrency, rates]);
 
+   const historyAddedRef = useRef<string | null>(null);
+
    useEffect(() => {
       if (!activeUid || totalNetWorth === 0) return;
       const today = new Date().toISOString().split('T')[0];
       const lastEntry = historyData.length > 0 ? historyData[historyData.length - 1] : null;
-      const lastDate = lastEntry?.date?.seconds ? new Date(lastEntry.date.seconds * 1000).toISOString().split('T')[0] : '';
-      if (lastDate !== today) {
+      let lastDate = '';
+      if (lastEntry) {
+         if (lastEntry.date && typeof lastEntry.date.seconds === 'number') {
+            lastDate = new Date(lastEntry.date.seconds * 1000).toISOString().split('T')[0];
+         } else if (lastEntry.date) {
+            lastDate = today; // Pending timestamp or other format
+         }
+      }
+      
+      if (lastDate !== today && historyAddedRef.current !== today) {
+         historyAddedRef.current = today;
          addDoc(collection(db, getCollectionPath(activeUid, null, 'history')), {
             date: serverTimestamp(),
             amount: totalNetWorth,
@@ -339,7 +350,14 @@ export default function App() {
       }
    }, [activeUid, totalNetWorth, historyData, baseCurrency]);
 
-   const historyChartData = useMemo(() => historyData.map(h => ({ label: safeDate(h.date), value: h.amount })).slice(-180), [historyData]);
+   const historyChartData = useMemo(() => {
+      const grouped: Record<string, number> = {};
+      historyData.forEach(h => {
+         const label = safeDate(h.date);
+         if (label) grouped[label] = h.amount; // Keeps the most recent entry for the day
+      });
+      return Object.entries(grouped).map(([label, value]) => ({ label, value })).slice(-180);
+   }, [historyData]);
    const cashFlowChartData = useMemo(() => getMonthlyCashFlow(transactions, baseCurrency, rates), [transactions, baseCurrency, rates]);
 
    const updateAssetPrices = async (showFeedback = true) => {
