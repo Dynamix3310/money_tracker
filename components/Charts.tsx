@@ -68,9 +68,13 @@ export const NetWorthAreaChart = ({ data }: { data: { label: string, value: numb
              <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
            </linearGradient>
          </defs>
+         <XAxis dataKey="label" hide />
          <YAxis domain={['auto', 'auto']} hide />
          <Area type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorValue)" isAnimationActive={false} />
-         <Tooltip contentStyle={{display: 'none'}} />
+         <Tooltip 
+           contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}
+           formatter={(value: number) => `$${value.toLocaleString()}`}
+         />
        </AreaChart>
      </ResponsiveContainer>
    );
