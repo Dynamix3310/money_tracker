@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal, FileSpreadsheet, Coins, Scale } from 'lucide-react';
+import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal, FileSpreadsheet, Coins, Scale, X } from 'lucide-react';
 import { AssetHolding, Transaction, BankAccount, CreditCardInfo, Person, BankTransaction, CreditCardLog, Platform } from '../types';
 import { ExpensePieChart } from './Charts';
 
@@ -140,13 +140,15 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
     const categories = useMemo(() => [...rawCategories].sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [rawCategories]);
     const [viewMode, setViewMode] = useState<'list' | 'stats' | 'debts' | 'budget'>('list');
     const [searchTerm, setSearchTerm] = useState('');
-    const [timeRange, setTimeRange] = useState<'week' | 'month' | 'lastMonth' | 'year' | 'custom'>('month');
+    const [timeRange, setTimeRange] = useState<'all' | 'week' | 'month' | 'lastMonth' | 'year' | 'custom'>('month');
     const [customStart, setCustomStart] = useState(new Date().toISOString().split('T')[0]);
     const [customEnd, setCustomEnd] = useState(new Date().toISOString().split('T')[0]);
     const [statsFilter, setStatsFilter] = useState<string>('all'); // 'all' or personId
 
     const [displayLimit, setDisplayLimit] = useState(50);
     const observerTarget = useRef(null);
+
+    useEffect(() => { setDisplayLimit(50); }, [searchTerm, timeRange, customStart, customEnd]);
 
     useEffect(() => {
         const observer = new IntersectionObserver((entries) => {
@@ -178,6 +180,11 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
         end.setHours(23, 59, 59, 999);
 
         switch (timeRange) {
+            case 'all': {
+                start = new Date(1970, 0, 1);
+                end = new Date(9999, 11, 31, 23, 59, 59);
+                break;
+            }
             case 'week': {
                 const day = now.getDay();
                 const diff = now.getDate() - day + (day === 0 ? -6 : 1);
@@ -213,18 +220,14 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
     const { start: filterStart, end: filterEnd } = useMemo(getDateRange, [timeRange, customStart, customEnd]);
 
     const filtered = useMemo(() => {
+        const term = searchTerm.trim().toLowerCase();
         return transactions.filter((t: any) => {
-            const matchSearch = t.description.toLowerCase().includes(searchTerm.toLowerCase()) || t.category.includes(searchTerm);
-
-            if (viewMode === 'stats') {
-                if (!t.date?.seconds) return false;
-                const d = new Date(t.date.seconds * 1000);
-                return d >= filterStart && d <= filterEnd;
-            }
-
-            return matchSearch;
+            if (term && !(t.description?.toLowerCase().includes(term) || t.category?.toLowerCase().includes(term))) return false;
+            if (!t.date?.seconds) return false;
+            const d = new Date(t.date.seconds * 1000);
+            return d >= filterStart && d <= filterEnd;
         }).sort((a: any, b: any) => (b.date?.seconds || 0) - (a.date?.seconds || 0));
-    }, [transactions, searchTerm, viewMode, filterStart, filterEnd]);
+    }, [transactions, searchTerm, filterStart, filterEnd]);
 
     const groupedTransactions = useMemo(() => {
         const groups: Record<string, any[]> = {};
@@ -317,13 +320,13 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
                         <button onClick={onAdd} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><Plus size={14} /> 記一筆</button>
                     </div>
                 </div>
-                {viewMode === 'list' && <div className="relative"><Search size={16} className="absolute left-3 top-2.5 text-slate-400" /><input placeholder="搜尋..." className="w-full bg-slate-50 border rounded-xl pl-10 pr-4 py-2 text-sm outline-none" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>}
-                {viewMode === 'stats' && (
+                {(viewMode === 'list' || viewMode === 'stats') && (
                     <div className="flex flex-col gap-2 pt-1">
+                        <div className="relative"><Search size={16} className="absolute left-3 top-2.5 text-slate-400" /><input placeholder="搜尋說明或分類..." className="w-full bg-slate-50 border rounded-xl pl-10 pr-4 py-2 text-sm outline-none" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />{searchTerm && <button onClick={() => setSearchTerm('')} className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"><X size={16} /></button>}</div>
                         <div className="flex flex-wrap gap-2">
-                            {['week', 'month', 'lastMonth', 'year', 'custom'].map((r: any) => (
+                            {['all', 'week', 'month', 'lastMonth', 'year', 'custom'].map((r: any) => (
                                 <button key={r} onClick={() => setTimeRange(r)} className={`px-3 py-1 rounded-full text-xs font-bold border ${timeRange === r ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200'}`}>
-                                    {r === 'week' ? '本週' : r === 'month' ? '本月' : r === 'lastMonth' ? '上月' : r === 'year' ? '今年' : r === 'custom' ? '自訂' : ''}
+                                    {r === 'all' ? '全部' : r === 'week' ? '本週' : r === 'month' ? '本月' : r === 'lastMonth' ? '上月' : r === 'year' ? '今年' : r === 'custom' ? '自訂' : ''}
                                 </button>
                             ))}
                         </div>
@@ -340,7 +343,7 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
 
             {viewMode === 'list' && (
                 <div className="space-y-4">
-                    {Object.keys(groupedTransactions).length === 0 ? <div className="text-center py-12 text-slate-400 text-sm">無紀錄</div> : Object.keys(groupedTransactions).sort((a, b) => {
+                    {Object.keys(groupedTransactions).length === 0 ? <div className="text-center py-12 text-slate-400 text-sm">{searchTerm ? `找不到符合「${searchTerm}」的紀錄` : '此區間無紀錄'}</div> : Object.keys(groupedTransactions).sort((a, b) => {
                         const timeA = groupedTransactions[a][0]?.date?.seconds || 0;
                         const timeB = groupedTransactions[b][0]?.date?.seconds || 0;
                         return timeB - timeA;

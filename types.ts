@@ -100,6 +100,7 @@ export interface RecurringRule {
   id: string;
   name: string;
   amount: number; // For DRIP, this represents Dividend Per Share (DPS). For others, it's total amount.
+  currency?: string; // Currency of `amount`; converted to the TWD ledger base when the rule fires. Defaults to TWD.
   category: string;
   type: 'expense' | 'income';
   payerId: string;

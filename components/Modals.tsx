@@ -20,9 +20,75 @@ const styles = {
 // Helper for number formatting
 const fmt = (num: number | undefined, digits = 2) => num ? Number(num).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: digits }) : '0';
 
+// --- Modal Chrome ---
+// Shared modal behaviour: ESC closes, a click on the backdrop closes, Tab cycles inside the
+// dialog instead of escaping to the page behind it. Only the topmost modal reacts.
+const modalStack: symbol[] = [];
+
+const useModalChrome = (onClose?: () => void) => {
+    const ref = useRef<HTMLDivElement>(null);
+    const id = useRef<symbol>(Symbol('modal'));
+
+    useEffect(() => {
+        const self = id.current;
+        modalStack.push(self);
+        return () => {
+            const at = modalStack.indexOf(self);
+            if (at >= 0) modalStack.splice(at, 1);
+        };
+    }, []);
+
+    useEffect(() => {
+        const isTopmost = () => modalStack[modalStack.length - 1] === id.current;
+        const focusable = () => {
+            const node = ref.current;
+            if (!node) return [] as HTMLElement[];
+            const selector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+            return (Array.from(node.querySelectorAll(selector)) as HTMLElement[]).filter(el => el.offsetParent !== null);
+        };
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (!isTopmost()) return;
+            if (e.key === 'Escape') { e.preventDefault(); onClose?.(); return; }
+            if (e.key !== 'Tab') return;
+            const items = focusable();
+            if (items.length === 0) return;
+            const first = items[0];
+            const last = items[items.length - 1];
+            const active = document.activeElement as HTMLElement | null;
+            if (e.shiftKey && (active === first || !ref.current?.contains(active))) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [onClose]);
+
+    return {
+        ref,
+        onMouseDown: (e: React.MouseEvent) => { if (e.target === e.currentTarget) onClose?.(); }
+    };
+};
+
+// --- Submit Button ---
+// Owns its own busy state so a slow save cannot be fired twice by an impatient tap.
+const SubmitButton = ({ onClick, className, children, disabled }: any) => {
+    const [busy, setBusy] = useState(false);
+    const mounted = useRef(true);
+    useEffect(() => () => { mounted.current = false; }, []);
+    const handle = async () => {
+        if (busy) return;
+        setBusy(true);
+        try { await onClick(); } finally { if (mounted.current) setBusy(false); }
+    };
+    return <button onClick={handle} disabled={busy || disabled} className={className}>{busy ? <Loader2 size={18} className="animate-spin" /> : children}</button>;
+};
+
 // --- Generic Confirmation Modal ---
-export const ConfirmActionModal = ({ title, message, onConfirm, onCancel }: any) => (
-    <div className={styles.overlay}>
+export const ConfirmActionModal = ({ title, message, onConfirm, onCancel }: any) => {
+    const chrome = useModalChrome(onCancel);
+    return (
+    <div className={styles.overlay} {...chrome}>
         <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-in zoom-in-95">
             <h3 className="font-bold text-xl text-slate-800 mb-2">{title}</h3>
             <p className="text-slate-500 text-sm mb-6">{message}</p>
@@ -33,10 +99,12 @@ export const ConfirmActionModal = ({ title, message, onConfirm, onCancel }: any)
         </div>
     </div>
 );
-
+};
 // --- Generic Manage List Modal ---
-export const ManageListModal = ({ title, items, renderItem, onEdit, onDelete, onClose }: any) => (
-    <div className={styles.overlay}>
+export const ManageListModal = ({ title, items, renderItem, onEdit, onDelete, onClose }: any) => {
+    const chrome = useModalChrome(onClose);
+    return (
+    <div className={styles.overlay} {...chrome}>
         <div className={styles.content}>
             <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-xl">{title}</h3>
@@ -57,10 +125,12 @@ export const ManageListModal = ({ title, items, renderItem, onEdit, onDelete, on
         </div>
     </div>
 );
-
+};
 // --- Manage Recurring Rules Modal ---
-export const ManageRecurringModal = ({ rules, onClose, onAdd, onEdit, onDelete }: any) => (
-    <div className={styles.overlay}>
+export const ManageRecurringModal = ({ rules, onClose, onAdd, onEdit, onDelete }: any) => {
+    const chrome = useModalChrome(onClose);
+    return (
+    <div className={styles.overlay} {...chrome}>
         <div className={styles.content}>
             <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-xl">管理固定收支</h3>
@@ -73,7 +143,7 @@ export const ManageRecurringModal = ({ rules, onClose, onAdd, onEdit, onDelete }
                     <div key={r.id} className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex justify-between items-center">
                         <div>
                             <div className="font-bold text-slate-800 text-sm flex items-center gap-2">{r.name} <span className={`text-[10px] px-1.5 rounded ${r.active ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-500'}`}>{r.active ? '啟用' : '停用'}</span></div>
-                            <div className="text-xs text-slate-400">下次: {r.nextDate?.seconds ? new Date(r.nextDate.seconds * 1000).toLocaleDateString() : 'N/A'} • ${r.amount} {r.intervalMonths ? `(每${r.intervalMonths}月)` : '(每月)'}</div>
+                            <div className="text-xs text-slate-400">下次: {r.nextDate?.seconds ? new Date(r.nextDate.seconds * 1000).toLocaleDateString() : 'N/A'} • {r.amount.toLocaleString()} {r.currency || 'TWD'} {r.intervalMonths ? `(每${r.intervalMonths}月)` : '(每月)'}</div>
                         </div>
                         <div className="flex gap-1">
                             <button onClick={() => onEdit(r)} className="p-2 text-slate-400 hover:text-indigo-600"><Edit size={16} /></button>
@@ -85,13 +155,15 @@ export const ManageRecurringModal = ({ rules, onClose, onAdd, onEdit, onDelete }
         </div>
     </div>
 );
-
+};
 // --- Add/Edit Recurring Rule Modal ---
 export const AddRecurringModal = ({ userId, groupId, people, categories, onClose, editData }: any) => {
+    const chrome = useModalChrome(onClose);
     const [name, setName] = useState(editData?.name || '');
     const [amount, setAmount] = useState(editData?.amount?.toString() || '');
     const [type, setType] = useState<'expense' | 'income'>(editData?.type || 'expense');
     const [category, setCategory] = useState(editData?.category || '');
+    const [currency, setCurrency] = useState(editData?.currency || 'TWD');
     const [payerId, setPayerId] = useState(editData?.payerId || (people[0]?.id || ''));
     const [nextDate, setNextDate] = useState(editData?.nextDate?.seconds ? new Date(editData.nextDate.seconds * 1000).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
     const [active, setActive] = useState(editData ? editData.active : true);
@@ -102,7 +174,7 @@ export const AddRecurringModal = ({ userId, groupId, people, categories, onClose
     const handleSave = async () => {
         if (!name || !amount) return;
         const data = {
-            name, amount: parseFloat(amount), type, category, payerId,
+            name, amount: parseFloat(amount), currency, type, category, payerId,
             frequency: 'monthly', active,
             nextDate: Timestamp.fromDate(new Date(nextDate))
         };
@@ -113,19 +185,19 @@ export const AddRecurringModal = ({ userId, groupId, people, categories, onClose
     };
 
     return (
-        <div className={styles.overlay}><div className={styles.content}>
+        <div className={styles.overlay} {...chrome}><div className={styles.content}>
             <h3 className="font-bold text-xl mb-4">{editData ? '編輯固定收支' : '新增固定收支 (每月)'}</h3>
             <div className="space-y-4">
                 <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={() => setType('expense')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'expense' ? 'bg-white shadow text-red-500' : 'text-slate-400'}`}>支出</button><button onClick={() => setType('income')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'income' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>收入</button></div>
                 <div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e => setName(e.target.value)} placeholder="例如: 房租" /></div>
-                <div><label className={styles.label}>金額</label><input type="number" className={styles.input} value={amount} onChange={e => setAmount(e.target.value)} /></div>
+                <div><label className={styles.label}>金額</label><div className="flex gap-2"><select className="bg-slate-100 rounded-xl px-3 text-sm font-bold outline-none" value={currency} onChange={e => setCurrency(e.target.value)}><option value="TWD">TWD</option><option value="USD">USD</option><option value="JPY">JPY</option></select><input type="number" className={`${styles.input} flex-1`} value={amount} onChange={e => setAmount(e.target.value)} /></div>{currency !== 'TWD' && <div className="text-[10px] text-slate-400 mt-1 ml-1">自動記帳時依當下匯率換算成 TWD</div>}</div>
                 <div className="grid grid-cols-2 gap-3">
                     <div><label className={styles.label}>分類</label><select className={styles.input} value={category} onChange={e => setCategory(e.target.value)}>{currentCats.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div>
                     <div><label className={styles.label}>成員</label><select className={styles.input} value={payerId} onChange={e => setPayerId(e.target.value)}>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
                 </div>
                 <div><label className={styles.label}>下次執行日期</label><input type="date" className={styles.input} value={nextDate} onChange={e => setNextDate(e.target.value)} /></div>
                 <div className="flex items-center gap-2"><input type="checkbox" id="active" checked={active} onChange={e => setActive(e.target.checked)} className="w-4 h-4" /><label htmlFor="active" className="text-sm font-bold text-slate-600">啟用自動記帳</label></div>
-                <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div>
+                <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><SubmitButton onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</SubmitButton></div>
             </div>
         </div></div>
     )
@@ -133,6 +205,7 @@ export const AddRecurringModal = ({ userId, groupId, people, categories, onClose
 
 // --- Settings ---
 export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, currentGroupId, groups, user, categories: rawCategories, onAddCategory, onDeleteCategory, onUpdateCategory, onGroupJoin, onGroupCreate, onGroupSwitch, currentTheme, onSetTheme, successAnimationType, onSetAnimationType }: any) => {
+    const chrome = useModalChrome(onClose);
     const [activeTab, setActiveTab] = useState('ledger');
     const [newCat, setNewCat] = useState('');
     const [catType, setCatType] = useState<'expense' | 'income'>('expense');
@@ -165,6 +238,18 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
         // To be safe, let's just update the two swapped items with their new array indices
     };
 
+    const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        try {
+            const json = JSON.parse(await file.text());
+            await onImport(json);
+        } catch {
+            alert('讀取備份檔失敗：檔案不是有效的 JSON');
+        }
+    };
+
     const handleSaveKeys = () => {
         localStorage.setItem('finnhub_key', finnhubKey);
         localStorage.setItem('user_gemini_key', geminiKey);
@@ -172,7 +257,7 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
     };
 
     return (
-        <div className={styles.overlay}>
+        <div className={styles.overlay} {...chrome}>
             <div className={styles.content}>
                 <div className="flex justify-between items-center mb-6">
                     <h3 className="font-bold text-xl">設定</h3>
@@ -289,7 +374,7 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
                         <button onClick={handleSaveKeys} className={styles.btnPrimary}>儲存金鑰</button>
                         <div className="border-t pt-4 mt-4">
                             <div className="flex gap-2 mt-2"><button onClick={onExport} className="flex-1 bg-slate-100 text-slate-600 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1 hover:bg-slate-200"><Download size={14} /> JSON</button><button onClick={onExportCSV} className="flex-1 bg-emerald-50 text-emerald-600 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1 hover:bg-emerald-100 border border-emerald-100"><FileSpreadsheet size={14} /> Excel</button></div>
-                            <button onClick={onImport} className="w-full mt-2 bg-slate-100 text-slate-600 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1 hover:bg-slate-200"><Upload size={14} /> 匯入備份 (JSON)</button>
+                            <label className="w-full mt-2 bg-slate-100 text-slate-600 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1 hover:bg-slate-200 cursor-pointer"><Upload size={14} /> 匯入備份 (JSON)<input type="file" accept="application/json,.json" className="hidden" onChange={handleImportFile} /></label>
                         </div>
                         <button onClick={() => { auth.signOut(); onClose(); }} className="w-full bg-red-50 text-red-500 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-red-100 transition-colors mt-4"><LogOut size={18} /> 登出帳號</button>
                     </div>
@@ -336,6 +421,7 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
 }
 
 export const PortfolioRebalanceModal = ({ holdings, platforms, rates, baseCurrency, convert, onClose }: any) => {
+    const chrome = useModalChrome(onClose);
     const [targets, setTargets] = useState({ stock: 60, crypto: 30, cash: 10 });
     const [aiAdvice, setAiAdvice] = useState('');
     const [loadingAi, setLoadingAi] = useState(false);
@@ -379,7 +465,7 @@ export const PortfolioRebalanceModal = ({ holdings, platforms, rates, baseCurren
     );
 
     return (
-        <div className={styles.overlay}><div className={`${styles.content} max-w-2xl`}>
+        <div className={styles.overlay} {...chrome}><div className={`${styles.content} max-w-2xl`}>
             <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl flex items-center gap-2"><Scale className="text-indigo-600" /> 再平衡</h3><button onClick={onClose}><X size={20} /></button></div>
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-6">
                 <h4 className="font-bold text-sm text-slate-500 mb-4 uppercase">配置目標 (總和: <span className={totalPercent !== 100 ? 'text-red-500' : 'text-emerald-600'}>{totalPercent}%</span>)</h4>
@@ -556,6 +642,7 @@ export const DateTimeField = ({ value, onChange }: any) => {
 };
 
 export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData, rates, convert, accounts, successAnimationType }: any) => {
+    const chrome = useModalChrome(onClose);
     const [type, setType] = useState<'expense' | 'income'>(editData?.type || 'expense');
     const [amount, setAmount] = useState(editData?.sourceAmount?.toString() || editData?.totalAmount?.toString() || '');
     const [currency, setCurrency] = useState(editData?.sourceCurrency || editData?.currency || 'TWD');
@@ -821,7 +908,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     };
 
     return (
-        <div className={styles.overlay}><div className={styles.content}>
+        <div className={styles.overlay} {...chrome}><div className={styles.content}>
             <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-xl">{editData ? '編輯' : '記一筆'}</h3>{!editData && <label className="cursor-pointer bg-indigo-50 text-indigo-600 px-3 py-1 rounded text-xs font-bold flex items-center gap-1">{loadingAI ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />} AI <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={loadingAI} /></label>}</div>
             <div className="space-y-4">
                 <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={() => setType('expense')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'expense' ? 'bg-white shadow text-red-500' : 'text-slate-400'}`}>支出</button><button onClick={() => setType('income')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'income' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>收入</button></div>
@@ -866,13 +953,14 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                     </div>
                 )}
                 {!editData && (<div className="flex items-center gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100"><input type="checkbox" id="recurring" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded" /><label htmlFor="recurring" className="text-sm font-bold text-indigo-700 flex items-center gap-2"><Repeat size={16} /> 固定收支</label></div>)}
-                <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div>
+                <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><SubmitButton onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</SubmitButton></div>
             </div>
         </div></div>
     )
 }
 
 export const AddPlatformModal = ({ userId, onClose, editData }: any) => {
+    const chrome = useModalChrome(onClose);
     const [name, setName] = useState(editData?.name || '');
     const [currency, setCurrency] = useState(editData?.currency || 'USD');
     const [type, setType] = useState(editData?.type || 'stock');
@@ -884,23 +972,27 @@ export const AddPlatformModal = ({ userId, onClose, editData }: any) => {
         if (editData) await updateDoc(doc(col, editData.id), data); else await addDoc(col, data);
         onClose();
     };
-    return (<div className={styles.overlay}><div className={styles.content}><h3 className="font-bold text-xl mb-4">{editData ? '編輯平台' : '新增平台'}</h3><div className="space-y-4"><div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e => setName(e.target.value)} /></div><div className="grid grid-cols-2 gap-3"><div><label className={styles.label}>類型</label><select className={styles.input} value={type} onChange={e => setType(e.target.value)}><option value="stock">證券</option><option value="crypto">加密</option></select></div><div><label className={styles.label}>幣別</label><select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value)}><option>USD</option><option>TWD</option><option>JPY</option><option>USDT</option></select></div></div><div><label className={styles.label}>現金餘額</label><input type="number" className={styles.input} value={balance} onChange={e => setBalance(e.target.value)} /></div><div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div></div></div></div>);
+    return (<div className={styles.overlay} {...chrome}><div className={styles.content}><h3 className="font-bold text-xl mb-4">{editData ? '編輯平台' : '新增平台'}</h3><div className="space-y-4"><div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e => setName(e.target.value)} /></div><div className="grid grid-cols-2 gap-3"><div><label className={styles.label}>類型</label><select className={styles.input} value={type} onChange={e => setType(e.target.value)}><option value="stock">證券</option><option value="crypto">加密</option></select></div><div><label className={styles.label}>幣別</label><select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value)}><option>USD</option><option>TWD</option><option>JPY</option><option>USDT</option></select></div></div><div><label className={styles.label}>現金餘額</label><input type="number" className={styles.input} value={balance} onChange={e => setBalance(e.target.value)} /></div><div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><SubmitButton onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</SubmitButton></div></div></div></div>);
 };
 
 export const ManagePlatformCashModal = ({ platform, userId, onClose }: any) => {
+    const chrome = useModalChrome(onClose);
     const [amount, setAmount] = useState('');
     const [type, setType] = useState<'deposit' | 'withdraw'>('deposit');
     const handleSave = async () => {
-        if (!amount) return;
-        const newBal = type === 'deposit' ? platform.balance + parseFloat(amount) : platform.balance - parseFloat(amount);
-        await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platform.id), { balance: newBal });
+        const value = parseFloat(amount);
+        if (!value) return;
+        // increment() keeps the balance correct even when another device writes at the same time.
+        const delta = type === 'deposit' ? value : -value;
+        await updateDoc(doc(db, getCollectionPath(userId, null, 'platforms'), platform.id), { balance: increment(delta) });
         onClose();
     };
-    return (<div className={styles.overlay}><div className={styles.content}><h3 className="font-bold text-xl mb-4">{platform.name} 現金管理</h3><div className="flex bg-slate-100 p-1 rounded-xl mb-4"><button onClick={() => setType('deposit')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'deposit' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>入金</button><button onClick={() => setType('withdraw')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'withdraw' ? 'bg-white shadow text-red-500' : 'text-slate-400'}`}>出金</button></div><div className="mb-4"><label className={styles.label}>金額</label><input type="number" className={styles.input} value={amount} onChange={e => setAmount(e.target.value)} autoFocus /></div><div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認</button></div></div></div>);
+    return (<div className={styles.overlay} {...chrome}><div className={styles.content}><h3 className="font-bold text-xl mb-4">{platform.name} 現金管理</h3><div className="flex bg-slate-100 p-1 rounded-xl mb-4"><button onClick={() => setType('deposit')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'deposit' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>入金</button><button onClick={() => setType('withdraw')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'withdraw' ? 'bg-white shadow text-red-500' : 'text-slate-400'}`}>出金</button></div><div className="mb-4"><label className={styles.label}>金額</label><input type="number" className={styles.input} value={amount} onChange={e => setAmount(e.target.value)} autoFocus /></div><div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><SubmitButton onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認</SubmitButton></div></div></div>);
 };
 
 // --- Add Asset Modal (Enhanced with Lots) ---
 export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
+    const chrome = useModalChrome(onClose);
     const [symbol, setSymbol] = useState('');
     const [quantity, setQuantity] = useState('');
     const [cost, setCost] = useState('');
@@ -981,7 +1073,7 @@ export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
     };
 
     return (
-        <div className={styles.overlay}><div className={styles.content}>
+        <div className={styles.overlay} {...chrome}><div className={styles.content}>
             <h3 className="font-bold text-xl mb-4">新增持倉 (買入)</h3>
             <div className="space-y-4">
                 <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={() => setType('stock')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'stock' ? 'bg-white shadow text-blue-600' : 'text-slate-400'}`}>股票</button><button onClick={() => setType('crypto')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'crypto' ? 'bg-white shadow text-orange-600' : 'text-slate-400'}`}>加密貨幣</button></div>
@@ -993,7 +1085,7 @@ export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
                 </div>
                 <div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e => setDate(e.target.value)} /></div>
                 <div className="flex items-center gap-2"><input type="checkbox" checked={deductCash} onChange={e => setDeductCash(e.target.checked)} className="w-4 h-4 text-indigo-600 rounded" /><label className="text-sm font-bold text-slate-600">從平台餘額扣款</label></div>
-                <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>新增</button></div>
+                <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><SubmitButton onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>新增</SubmitButton></div>
             </div>
         </div></div>
     );
@@ -1001,6 +1093,7 @@ export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
 
 // --- Sell Asset Modal (FIFO / Lots) ---
 export const SellAssetModal = ({ holding, userId, onClose }: any) => {
+    const chrome = useModalChrome(onClose);
     const [price, setPrice] = useState(holding.manualPrice || holding.currentPrice);
     const [mode, setMode] = useState<'fifo' | 'specific'>('fifo');
     const [sellQty, setSellQty] = useState<string>('');
@@ -1157,7 +1250,7 @@ export const SellAssetModal = ({ holding, userId, onClose }: any) => {
     };
 
     return (
-        <div className={styles.overlay}><div className={`${styles.content} max-w-lg`}>
+        <div className={styles.overlay} {...chrome}><div className={`${styles.content} max-w-lg`}>
             <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl">賣出 {holding.symbol}</h3><button onClick={onClose}><X /></button></div>
             <div className="grid grid-cols-2 gap-4 mb-4">
                 <div><label className={styles.label}>賣出單價 ({holding.currency})</label><input type="number" className={styles.input} value={price} onChange={e => setPrice(parseFloat(e.target.value))} /></div>
@@ -1211,6 +1304,7 @@ export const SellAssetModal = ({ holding, userId, onClose }: any) => {
 
 // --- Edit Asset Price Modal (Fix buttons not working) ---
 export const EditAssetPriceModal = ({ holding, userId, onClose, onEditInfo, onSell }: any) => {
+    const chrome = useModalChrome(onClose);
     const [manualPrice, setManualPrice] = useState(holding.manualPrice?.toString() || '');
     const handleSave = async () => {
         const price = manualPrice ? parseFloat(manualPrice) : null;
@@ -1220,7 +1314,7 @@ export const EditAssetPriceModal = ({ holding, userId, onClose, onEditInfo, onSe
         onClose();
     };
     return (
-        <div className={styles.overlay}><div className={styles.content}>
+        <div className={styles.overlay} {...chrome}><div className={styles.content}>
             <div className="flex justify-between items-start mb-4">
                 <div><h3 className="font-bold text-xl">{holding.symbol}</h3><div className="text-xs text-slate-500">現價: {holding.currentPrice} {holding.currency}</div></div>
                 <button onClick={onClose}><X size={20} /></button>
@@ -1230,13 +1324,14 @@ export const EditAssetPriceModal = ({ holding, userId, onClose, onEditInfo, onSe
                 <button onClick={onEditInfo} className="bg-slate-100 text-slate-700 py-3 rounded-xl font-bold text-sm flex flex-col items-center justify-center gap-1 hover:bg-slate-200"><Edit size={16} /> 修改成本/數量</button>
                 <button onClick={onSell} className="bg-indigo-50 text-indigo-600 py-3 rounded-xl font-bold text-sm flex flex-col items-center justify-center gap-1 hover:bg-indigo-100"><Coins size={16} /> 賣出資產</button>
             </div>
-            <button onClick={handleSave} className={`${styles.btnPrimary} w-full`}>儲存價格設定</button>
+            <SubmitButton onClick={handleSave} className={`${styles.btnPrimary} w-full`}>儲存價格設定</SubmitButton>
         </div></div>
     );
 };
 
 // --- Add Dividend (Enhanced with DRIP Lots) ---
 export const AddDividendModal = ({ userId, groupId, platforms, holdings, people, onClose }: any) => {
+    const chrome = useModalChrome(onClose);
     const [holdingId, setHoldingId] = useState(holdings[0]?.id || '');
     const [amount, setAmount] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -1375,7 +1470,7 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
     };
 
     return (
-        <div className={styles.overlay}><div className={styles.content}>
+        <div className={styles.overlay} {...chrome}><div className={styles.content}>
             <h3 className="font-bold text-xl mb-4">領取股息</h3>
             <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
                 <button onClick={() => setType('cash')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'cash' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>現金 (Cash)</button>
@@ -1417,7 +1512,7 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
                     </div>
                 )}
 
-                <button onClick={handleSave} className={styles.btnPrimary}>確認</button>
+                <SubmitButton onClick={handleSave} className={styles.btnPrimary}>確認</SubmitButton>
             </div>
         </div></div>
     );
@@ -1426,6 +1521,7 @@ export const AddDividendModal = ({ userId, groupId, platforms, holdings, people,
 // --- Missing Modals Implementation ---
 
 export const AddAccountModal = ({ userId, onClose, editData }: any) => {
+    const chrome = useModalChrome(onClose);
     const [name, setName] = useState(editData?.name || '');
     const [currency, setCurrency] = useState(editData?.currency || 'TWD');
     const [initialBalance, setInitialBalance] = useState(editData?.initialBalance?.toString() || '0');
@@ -1436,7 +1532,7 @@ export const AddAccountModal = ({ userId, onClose, editData }: any) => {
         onClose();
     };
     return (
-        <div className={styles.overlay}><div className={styles.content}>
+        <div className={styles.overlay} {...chrome}><div className={styles.content}>
             <h3 className="font-bold text-xl mb-4">{editData ? '編輯帳戶' : '新增銀行帳戶'}</h3>
             <div className="space-y-4">
                 <div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e => setName(e.target.value)} /></div>
@@ -1444,13 +1540,14 @@ export const AddAccountModal = ({ userId, onClose, editData }: any) => {
                     <div><label className={styles.label}>幣別</label><select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value)}><option>TWD</option><option>USD</option><option>JPY</option></select></div>
                     <div><label className={styles.label}>初始餘額</label><input type="number" className={styles.input} value={initialBalance} onChange={e => setInitialBalance(e.target.value)} /></div>
                 </div>
-                <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div>
+                <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><SubmitButton onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</SubmitButton></div>
             </div>
         </div></div>
     );
 };
 
 export const AddCardModal = ({ userId, onClose, editData }: any) => {
+    const chrome = useModalChrome(onClose);
     const [name, setName] = useState(editData?.name || '');
     const [billingDay, setBillingDay] = useState(editData?.billingDay?.toString() || '1');
     const handleSave = async () => {
@@ -1460,18 +1557,19 @@ export const AddCardModal = ({ userId, onClose, editData }: any) => {
         onClose();
     };
     return (
-        <div className={styles.overlay}><div className={styles.content}>
+        <div className={styles.overlay} {...chrome}><div className={styles.content}>
             <h3 className="font-bold text-xl mb-4">{editData ? '編輯信用卡' : '新增信用卡'}</h3>
             <div className="space-y-4">
                 <div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e => setName(e.target.value)} /></div>
                 <div><label className={styles.label}>結帳日 (每月幾號)</label><input type="number" min="1" max="31" className={styles.input} value={billingDay} onChange={e => setBillingDay(e.target.value)} /></div>
-                <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div>
+                <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><SubmitButton onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</SubmitButton></div>
             </div>
         </div></div>
     );
 };
 
 export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
+    const chrome = useModalChrome(onClose);
     const [qty, setQty] = useState(holding.quantity.toString());
     const [avgCost, setAvgCost] = useState(holding.avgCost.toString());
     const handleSave = async () => {
@@ -1482,12 +1580,12 @@ export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
         onClose();
     };
     return (
-        <div className={styles.overlay}><div className={styles.content}>
+        <div className={styles.overlay} {...chrome}><div className={styles.content}>
             <h3 className="font-bold text-xl mb-4">編輯資產: {holding.symbol}</h3>
             <div className="space-y-4">
                 <div><label className={styles.label}>持有數量</label><input type="number" className={styles.input} value={qty} onChange={e => setQty(e.target.value)} /></div>
                 <div><label className={styles.label}>平均成本</label><input type="number" className={styles.input} value={avgCost} onChange={e => setAvgCost(e.target.value)} /></div>
-                <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</button></div>
+                <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><SubmitButton onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</SubmitButton></div>
                 <button onClick={() => onDelete(holding)} className="w-full text-red-500 text-sm font-bold mt-2">刪除此資產</button>
             </div>
         </div></div>
@@ -1495,6 +1593,7 @@ export const EditAssetModal = ({ holding, userId, onClose, onDelete }: any) => {
 };
 
 export const TransferModal = ({ userId, accounts, onClose }: any) => {
+    const chrome = useModalChrome(onClose);
     const [fromId, setFromId] = useState(accounts[0]?.id || '');
     const [toId, setToId] = useState(accounts.length > 1 ? accounts[1].id : '');
     const [amount, setAmount] = useState('');
@@ -1511,7 +1610,7 @@ export const TransferModal = ({ userId, accounts, onClose }: any) => {
         onClose();
     };
     return (
-        <div className={styles.overlay}><div className={styles.content}>
+        <div className={styles.overlay} {...chrome}><div className={styles.content}>
             <h3 className="font-bold text-xl mb-4">內部轉帳</h3>
             <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
@@ -1520,13 +1619,14 @@ export const TransferModal = ({ userId, accounts, onClose }: any) => {
                 </div>
                 <div><label className={styles.label}>金額</label><input type="number" className={styles.input} value={amount} onChange={e => setAmount(e.target.value)} /></div>
                 <div><label className={styles.label}>日期</label><input type="date" className={styles.input} value={date} onChange={e => setDate(e.target.value)} /></div>
-                <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><button onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認轉帳</button></div>
+                <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><SubmitButton onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>確認轉帳</SubmitButton></div>
             </div>
         </div></div>
     );
 };
 
 export const BankDetailModal = ({ userId, account, logs, onClose, onImport }: any) => {
+    const chrome = useModalChrome(onClose);
     const [amount, setAmount] = useState('');
     const [type, setType] = useState<'in' | 'out'>('out');
     const [desc, setDesc] = useState('');
@@ -1567,7 +1667,7 @@ export const BankDetailModal = ({ userId, account, logs, onClose, onImport }: an
     const sortedMonths = Object.keys(groupedLogs).sort((a, b) => b.localeCompare(a, 'zh-TW', { numeric: true }));
 
     return (
-        <div className={styles.overlay}>
+        <div className={styles.overlay} {...chrome}>
             <div className={styles.content}>
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="font-bold text-xl">{account.name}</h3>
@@ -1587,7 +1687,7 @@ export const BankDetailModal = ({ userId, account, logs, onClose, onImport }: an
                     <div className="flex gap-2">
                         <input placeholder="金額" type="number" className="w-24 rounded-lg border px-3 text-sm h-9" value={amount} onChange={e => setAmount(e.target.value)} />
                         <input placeholder="備註" className="flex-1 rounded-lg border px-3 text-sm h-9" value={desc} onChange={e => setDesc(e.target.value)} />
-                        <button onClick={handleSave} className="bg-indigo-600 text-white px-4 rounded-lg font-bold text-sm h-9">存</button>
+                        <SubmitButton onClick={handleSave} className="bg-indigo-600 text-white px-4 rounded-lg font-bold text-sm h-9">存</SubmitButton>
                     </div>
                 </div>
                 <div className="space-y-0 max-h-[40vh] overflow-y-auto border rounded-xl border-slate-100">
@@ -1620,6 +1720,8 @@ export const CardDetailModal = ({ userId, card, cardLogs, allCardLogs, transacti
     const [desc, setDesc] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [linkLog, setLinkLog] = useState<CreditCardLog | null>(null);
+    // While the link picker is open, dismissing returns to the card instead of closing it.
+    const chrome = useModalChrome(linkLog ? () => setLinkLog(null) : onClose);
     const today = new Date();
     const billingDay = card.billingDay;
     let cycleStart = new Date(today.getFullYear(), today.getMonth(), billingDay);
@@ -1683,7 +1785,7 @@ export const CardDetailModal = ({ userId, card, cardLogs, allCardLogs, transacti
     const handleDeleteClick = async (id: string) => { if (window.confirm('確定要刪除此筆刷卡紀錄嗎？(需二次確認)')) { await deleteDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), id)); if (editingId === id) { setShowAddLog(false); setEditingId(null); } } };
     const linkTrans = async (transId: string) => { if (!linkLog) return; await updateDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), linkLog.id), { isReconciled: true, linkedTransactionId: transId }); setLinkLog(null); }
 
-    return (<div className={styles.overlay}> {linkLog ? (<div className={styles.content}>
+    return (<div className={styles.overlay} {...chrome}> {linkLog ? (<div className={styles.content}>
         <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">連結記帳資料 (對帳)</h3><button onClick={() => setLinkLog(null)}><X /></button></div>
         <div className="bg-slate-50 p-3 rounded-xl mb-4 border border-indigo-100">
             <div className="text-xs text-slate-500 mb-1">正在為此筆刷卡紀錄尋找對應記帳：</div>
@@ -1711,10 +1813,11 @@ export const CardDetailModal = ({ userId, card, cardLogs, allCardLogs, transacti
                 )
             })}
         </div>
-    </div>) : (<div className={`${styles.content} h-[85vh]`}> <div className="flex justify-between items-center mb-4"> <div><h3 className="font-bold text-xl">{card.name}</h3><div className="text-xs text-slate-500">結帳日: 每月 {card.billingDay} 號</div></div> <button onClick={onClose}><X /></button> </div> <div className="flex items-center justify-between bg-slate-100 p-2 rounded-xl mb-4"> <button onClick={prevCycle} className="p-1 hover:bg-white rounded">◀</button> <div className="text-xs font-bold text-slate-600">{currentCycleStart.toLocaleDateString()} ~ {currentCycleEnd.toLocaleDateString()}</div> <button onClick={nextCycle} className="p-1 hover:bg-white rounded">▶</button> </div> <button onClick={() => { setShowAddLog(!showAddLog); setEditingId(null); setAmt(''); setDesc(''); }} className="w-full py-2 mb-4 border-2 border-dashed border-indigo-200 text-indigo-600 rounded-xl font-bold text-sm">{showAddLog && !editingId ? '隱藏新增' : '+ 新增刷卡紀錄'}</button> {showAddLog && (<div className="bg-slate-50 p-4 rounded-xl border mb-4 space-y-2 animate-in slide-in-from-bottom-4"> <div className="text-xs font-bold text-indigo-500 mb-1">{editingId ? '編輯紀錄' : '新增紀錄'}</div> <div className="flex gap-2"> <div className="flex-1"><label className={styles.label}>日期</label><input type="date" className="w-full p-2 rounded border text-sm" value={date} onChange={e => setDate(e.target.value)} /></div> <div className="flex-1"><label className={styles.label}>金額</label><input type="number" className="w-full p-2 rounded border text-sm" value={amt} onChange={e => setAmt(e.target.value)} /></div> </div> <div><label className={styles.label}>說明</label><div className="flex gap-2"><input className="flex-1 p-2 rounded border text-sm" value={desc} onChange={e => setDesc(e.target.value)} /><button onClick={handleSaveLog} className="bg-indigo-600 text-white px-4 rounded text-xs font-bold">{editingId ? '更新' : '存'}</button></div></div> </div>)} <div className="space-y-2 max-h-[50vh] overflow-y-auto"> {viewLogs.length === 0 && <div className="text-center text-slate-400 py-4">此週期無紀錄</div>} {viewLogs.map((log: any) => { const linkedT = transactions.find((t: any) => t.id === log.linkedTransactionId); return (<div key={log.id} className={`p-3 rounded-xl border ${log.isReconciled ? 'bg-emerald-50/50 border-emerald-100' : 'bg-white border-slate-200'}`}> <div className="flex justify-between items-center mb-1"> <div className="flex items-center gap-2"> <button onClick={async () => { await updateDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), log.id), { isReconciled: !log.isReconciled }) }}>{log.isReconciled ? <CheckCircle size={18} className="text-emerald-500" /> : <Circle size={18} className="text-slate-300" />}</button> <span className={`text-sm font-bold ${log.isReconciled ? 'text-slate-400 line-through' : ''}`}>{log.description}</span> </div> <div className="font-bold font-mono">${log.amount}</div> </div> <div className="flex justify-between items-center pl-7"> <div className="text-[10px] text-slate-400">{new Date((log.date.seconds as number) * 1000).toLocaleDateString()}</div> <div className="flex items-center gap-2"> {!log.isReconciled && <button onClick={() => setLinkLog(log)} className="text-[10px] flex gap-1 bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold"><LinkIcon size={10} /> 連結</button>} {log.isReconciled && linkedT && <span className="text-[10px] text-emerald-600 flex gap-1 bg-emerald-50 px-2 py-1 rounded"><Link2 size={10} /> {linkedT.description}</span>} <button onClick={() => handleEditClick(log)} className="text-slate-400 hover:text-indigo-600"><Edit size={12} /></button> <button onClick={() => handleDeleteClick(log.id)} className="text-slate-400 hover:text-red-600"><Trash2 size={12} /></button> </div> </div> </div>) })} </div> </div>)} </div>)
+    </div>) : (<div className={`${styles.content} h-[85vh]`}> <div className="flex justify-between items-center mb-4"> <div><h3 className="font-bold text-xl">{card.name}</h3><div className="text-xs text-slate-500">結帳日: 每月 {card.billingDay} 號</div></div> <button onClick={onClose}><X /></button> </div> <div className="flex items-center justify-between bg-slate-100 p-2 rounded-xl mb-4"> <button onClick={prevCycle} className="p-1 hover:bg-white rounded">◀</button> <div className="text-xs font-bold text-slate-600">{currentCycleStart.toLocaleDateString()} ~ {currentCycleEnd.toLocaleDateString()}</div> <button onClick={nextCycle} className="p-1 hover:bg-white rounded">▶</button> </div> <button onClick={() => { setShowAddLog(!showAddLog); setEditingId(null); setAmt(''); setDesc(''); }} className="w-full py-2 mb-4 border-2 border-dashed border-indigo-200 text-indigo-600 rounded-xl font-bold text-sm">{showAddLog && !editingId ? '隱藏新增' : '+ 新增刷卡紀錄'}</button> {showAddLog && (<div className="bg-slate-50 p-4 rounded-xl border mb-4 space-y-2 animate-in slide-in-from-bottom-4"> <div className="text-xs font-bold text-indigo-500 mb-1">{editingId ? '編輯紀錄' : '新增紀錄'}</div> <div className="flex gap-2"> <div className="flex-1"><label className={styles.label}>日期</label><input type="date" className="w-full p-2 rounded border text-sm" value={date} onChange={e => setDate(e.target.value)} /></div> <div className="flex-1"><label className={styles.label}>金額</label><input type="number" className="w-full p-2 rounded border text-sm" value={amt} onChange={e => setAmt(e.target.value)} /></div> </div> <div><label className={styles.label}>說明</label><div className="flex gap-2"><input className="flex-1 p-2 rounded border text-sm" value={desc} onChange={e => setDesc(e.target.value)} /><SubmitButton onClick={handleSaveLog} className="bg-indigo-600 text-white px-4 rounded text-xs font-bold">{editingId ? '更新' : '存'}</SubmitButton></div></div> </div>)} <div className="space-y-2 max-h-[50vh] overflow-y-auto"> {viewLogs.length === 0 && <div className="text-center text-slate-400 py-4">此週期無紀錄</div>} {viewLogs.map((log: any) => { const linkedT = transactions.find((t: any) => t.id === log.linkedTransactionId); return (<div key={log.id} className={`p-3 rounded-xl border ${log.isReconciled ? 'bg-emerald-50/50 border-emerald-100' : 'bg-white border-slate-200'}`}> <div className="flex justify-between items-center mb-1"> <div className="flex items-center gap-2"> <button onClick={async () => { await updateDoc(doc(db, getCollectionPath(userId, null, 'cardLogs'), log.id), { isReconciled: !log.isReconciled }) }}>{log.isReconciled ? <CheckCircle size={18} className="text-emerald-500" /> : <Circle size={18} className="text-slate-300" />}</button> <span className={`text-sm font-bold ${log.isReconciled ? 'text-slate-400 line-through' : ''}`}>{log.description}</span> </div> <div className="font-bold font-mono">${log.amount}</div> </div> <div className="flex justify-between items-center pl-7"> <div className="text-[10px] text-slate-400">{new Date((log.date.seconds as number) * 1000).toLocaleDateString()}</div> <div className="flex items-center gap-2"> {!log.isReconciled && <button onClick={() => setLinkLog(log)} className="text-[10px] flex gap-1 bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold"><LinkIcon size={10} /> 連結</button>} {log.isReconciled && linkedT && <span className="text-[10px] text-emerald-600 flex gap-1 bg-emerald-50 px-2 py-1 rounded"><Link2 size={10} /> {linkedT.description}</span>} <button onClick={() => handleEditClick(log)} className="text-slate-400 hover:text-indigo-600"><Edit size={12} /></button> <button onClick={() => handleDeleteClick(log.id)} className="text-slate-400 hover:text-red-600"><Trash2 size={12} /></button> </div> </div> </div>) })} </div> </div>)} </div>)
 }
 
 export const AIAssistantModal = ({ onClose, contextData }: any) => {
+    const chrome = useModalChrome(onClose);
     const [messages, setMessages] = useState<ChatMessage[]>([{ role: 'model', text: '你好！我是您的財務助理。有關您的資產或記帳問題都可以問我。' }]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
@@ -1733,7 +1836,7 @@ export const AIAssistantModal = ({ onClose, contextData }: any) => {
         setLoading(false);
     };
     return (
-        <div className={styles.overlay}><div className={`${styles.content} h-[600px] flex flex-col`}>
+        <div className={styles.overlay} {...chrome}><div className={`${styles.content} h-[600px] flex flex-col`}>
             <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-xl flex items-center gap-2"><Sparkles className="text-indigo-600" /> AI 助理</h3><button onClick={onClose}><X size={20} /></button></div>
             <div className="flex-1 overflow-y-auto space-y-3 mb-4 p-2 bg-slate-50 rounded-xl">
                 {messages.map((m, i) => (<div key={i} className={`p-3 rounded-xl text-sm max-w-[80%] ${m.role === 'user' ? 'bg-indigo-600 text-white self-end ml-auto' : 'bg-white text-slate-700 shadow-sm'}`}>{m.text}</div>))}
@@ -1745,6 +1848,7 @@ export const AIAssistantModal = ({ onClose, contextData }: any) => {
 };
 
 export const AIBatchImportModal = ({ userId, groupId, categories, existingTransactions, accounts, creditCards, existingBankLogs, existingCardLogs, people, onClose, initialConfig }: any) => {
+    const chrome = useModalChrome(onClose);
     const [mode, setMode] = useState<'text' | 'image' | 'file'>('text');
     const [target, setTarget] = useState<'ledger' | 'bank' | 'card'>('ledger');
     const [targetId, setTargetId] = useState('');
@@ -1974,7 +2078,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
     };
 
     return (
-        <div className={styles.overlay}>
+        <div className={styles.overlay} {...chrome}>
             <div className={`${styles.content} max-w-2xl`}>
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="font-bold text-xl flex items-center gap-2"><Sparkles className="text-indigo-500" /> AI 批次匯入</h3>

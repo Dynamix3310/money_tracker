@@ -1,14 +1,38 @@
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, setDoc, increment, where, limit } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, Timestamp, query, orderBy, getDoc, getDocs, setDoc, increment, where, limit, runTransaction, writeBatch } from 'firebase/firestore';
 import { Wallet, TrendingUp, Home, Users, LineChart, Settings, Plus, Loader2, Sparkles, Lock, BellRing, ChevronDown, Eye, EyeOff } from 'lucide-react';
 import { auth, db, getCollectionPath, getUserProfilePath } from './services/firebase';
 import { fetchExchangeRates, fetchCryptoPrice, fetchStockPrice, getCachedRates } from './services/api';
 import { ADMIN_EMAILS } from './services/gemini';
-import { ExpensePieChart, CashFlowBarChart, NetWorthAreaChart } from './components/Charts';
-import { SettingsModal, SellAssetModal, AddTransactionModal, AddAssetModal, AddAccountModal, AddCardModal, BankDetailModal, AIAssistantModal, CardDetailModal, TransferModal, EditAssetModal, ConfirmActionModal, AddPlatformModal, ManagePlatformCashModal, ManageListModal, AddRecurringModal, ManageRecurringModal, AIBatchImportModal, EditAssetPriceModal, AddDividendModal, PortfolioRebalanceModal } from './components/Modals';
-import { PortfolioView, LedgerView, CashView } from './components/Views';
+// Charts (recharts), views and modals load on demand so the first paint ships far less JavaScript.
+const CashFlowBarChart = lazy(() => import('./components/Charts').then(m => ({ default: m.CashFlowBarChart })));
+const NetWorthAreaChart = lazy(() => import('./components/Charts').then(m => ({ default: m.NetWorthAreaChart })));
+const PortfolioView = lazy(() => import('./components/Views').then(m => ({ default: m.PortfolioView })));
+const LedgerView = lazy(() => import('./components/Views').then(m => ({ default: m.LedgerView })));
+const CashView = lazy(() => import('./components/Views').then(m => ({ default: m.CashView })));
+const SettingsModal = lazy(() => import('./components/Modals').then(m => ({ default: m.SettingsModal })));
+const SellAssetModal = lazy(() => import('./components/Modals').then(m => ({ default: m.SellAssetModal })));
+const AddTransactionModal = lazy(() => import('./components/Modals').then(m => ({ default: m.AddTransactionModal })));
+const AddAssetModal = lazy(() => import('./components/Modals').then(m => ({ default: m.AddAssetModal })));
+const AddAccountModal = lazy(() => import('./components/Modals').then(m => ({ default: m.AddAccountModal })));
+const AddCardModal = lazy(() => import('./components/Modals').then(m => ({ default: m.AddCardModal })));
+const BankDetailModal = lazy(() => import('./components/Modals').then(m => ({ default: m.BankDetailModal })));
+const AIAssistantModal = lazy(() => import('./components/Modals').then(m => ({ default: m.AIAssistantModal })));
+const CardDetailModal = lazy(() => import('./components/Modals').then(m => ({ default: m.CardDetailModal })));
+const TransferModal = lazy(() => import('./components/Modals').then(m => ({ default: m.TransferModal })));
+const EditAssetModal = lazy(() => import('./components/Modals').then(m => ({ default: m.EditAssetModal })));
+const ConfirmActionModal = lazy(() => import('./components/Modals').then(m => ({ default: m.ConfirmActionModal })));
+const AddPlatformModal = lazy(() => import('./components/Modals').then(m => ({ default: m.AddPlatformModal })));
+const ManagePlatformCashModal = lazy(() => import('./components/Modals').then(m => ({ default: m.ManagePlatformCashModal })));
+const ManageListModal = lazy(() => import('./components/Modals').then(m => ({ default: m.ManageListModal })));
+const AddRecurringModal = lazy(() => import('./components/Modals').then(m => ({ default: m.AddRecurringModal })));
+const ManageRecurringModal = lazy(() => import('./components/Modals').then(m => ({ default: m.ManageRecurringModal })));
+const AIBatchImportModal = lazy(() => import('./components/Modals').then(m => ({ default: m.AIBatchImportModal })));
+const EditAssetPriceModal = lazy(() => import('./components/Modals').then(m => ({ default: m.EditAssetPriceModal })));
+const AddDividendModal = lazy(() => import('./components/Modals').then(m => ({ default: m.AddDividendModal })));
+const PortfolioRebalanceModal = lazy(() => import('./components/Modals').then(m => ({ default: m.PortfolioRebalanceModal })));
 import { AssetHolding, Platform, BankAccount, BankTransaction, CreditCardInfo, CreditCardLog, Transaction, Person, Category, RecurringRule, NetWorthHistory, Group } from './types';
 import { AuthScreen } from './components/Auth';
 
@@ -24,10 +48,35 @@ const THEME_COLORS: any = {
    'violet': { 50: '#f5f3ff', 100: '#ede9fe', 200: '#ddd6fe', 300: '#c4b5fd', 400: '#a78bfa', 500: '#8b5cf6', 600: '#7c3aed', 700: '#6d28d9', 800: '#5b21b6', 900: '#4c1d95', 950: '#2e1065' },
 };
 
+const PanelFallback = () => <div className="h-40 flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={24} /></div>;
+const ModalFallback = () => <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] flex items-center justify-center"><Loader2 className="animate-spin text-white" size={28} /></div>;
+
 const convert = (amount: number, from: string, to: string, rates: Record<string, number>) => {
    const rateFrom = rates[from] || 1;
    const rateTo = rates[to] || 1;
    return (amount / rateFrom) * rateTo;
+};
+
+// Collections a backup covers. Assets stay private, ledger data belongs to the active group.
+const PRIVATE_COLLECTIONS = ['platforms', 'holdings', 'accounts', 'bankLogs', 'creditCards', 'cardLogs', 'history'];
+const GROUP_COLLECTIONS = ['transactions', 'people', 'categories', 'recurring'];
+
+// Firestore Timestamps survive JSON as { seconds, nanoseconds }; turn them back into Timestamps on import.
+const reviveTimestamps = (value: any): any => {
+   if (Array.isArray(value)) return value.map(reviveTimestamps);
+   if (value && typeof value === 'object') {
+      if (typeof value.seconds === 'number' && typeof value.nanoseconds === 'number') {
+         return new Timestamp(value.seconds, value.nanoseconds);
+      }
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, reviveTimestamps(v)]));
+   }
+   return value;
+};
+
+// RFC 4180 quoting - descriptions routinely contain commas.
+const csvCell = (value: any) => {
+   const text = value === undefined || value === null ? '' : String(value);
+   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 };
 
 const safeDate = (dateObj: any) => {
@@ -106,6 +155,12 @@ export default function App() {
    useEffect(() => {
       holdingsRef.current = holdings;
    }, [holdings]);
+
+   const ratesRef = useRef(rates);
+   useEffect(() => { ratesRef.current = rates; }, [rates]);
+
+   // Stops the hourly timer and the snapshot-triggered run from overlapping in this tab.
+   const recurringBusyRef = useRef(false);
 
    useEffect(() => {
       const params = new URLSearchParams(window.location.search);
@@ -186,9 +241,13 @@ export default function App() {
    }, [recurringRules, activeUid]);
 
    const checkRecurringRules = async () => {
+      if (recurringBusyRef.current) return;
+      recurringBusyRef.current = true;
+      try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const apiKey = localStorage.getItem('finnhub_key') || undefined;
+      const currentRates = ratesRef.current;
 
       for (const rule of recurringRules) {
          if (!rule.active || !rule.nextDate) continue;
@@ -196,9 +255,31 @@ export default function App() {
          nextDate.setHours(0, 0, 0, 0);
 
          if (nextDate.getTime() <= today.getTime()) {
+            const interval = rule.intervalMonths || 1;
+            const ruleRef = doc(db, getCollectionPath(activeUid, currentGroupId, 'recurring'), rule.id);
+
+            // Claim the period by advancing nextDate inside a transaction. Whoever wins the race
+            // posts the entry; other tabs and devices see the new date and skip it.
+            const claimed = await runTransaction(db, async (tx) => {
+               const snap = await tx.get(ruleRef);
+               if (!snap.exists()) return false;
+               const stored: any = snap.data();
+               if (!stored.active || !stored.nextDate?.seconds) return false;
+               const due = new Date(stored.nextDate.seconds * 1000);
+               due.setHours(0, 0, 0, 0);
+               if (due.getTime() > today.getTime()) return false;
+               const advanced = new Date(due);
+               advanced.setMonth(advanced.getMonth() + interval);
+               tx.update(ruleRef, { nextDate: Timestamp.fromDate(advanced) });
+               return true;
+            }).catch((e) => { console.error('Recurring claim failed', e); return false; });
+
+            if (!claimed) continue;
+
             let transDesc = `${rule.name} (自動)`;
             let shouldUpdateCash = true;
             let transactionAmount = rule.amount;
+            let amountCurrency = rule.currency || 'TWD';
 
             if (rule.isDRIP && rule.linkedHoldingId) {
                shouldUpdateCash = false;
@@ -207,6 +288,7 @@ export default function App() {
                   const holdingSnap = await getDoc(holdingRef);
                   if (holdingSnap.exists()) {
                      const h = holdingSnap.data() as AssetHolding;
+                     amountCurrency = h.currency || amountCurrency;
                      const heldShares = Math.floor(h.quantity);
                      const dividendPerShare = rule.amount;
                      const totalDividendAmount = heldShares * dividendPerShare;
@@ -237,24 +319,37 @@ export default function App() {
                } catch (e) { console.error("DRIP Error", e); }
             }
 
+            // The ledger is kept in TWD, so a foreign-currency rule is converted at today's rate
+            // and the original amount is stored alongside it.
+            const ledgerAmount = convert(transactionAmount, amountCurrency, 'TWD', currentRates);
+            const distribute = (map?: Record<string, number>) => {
+               const entries = Object.entries(map || {});
+               const sum = entries.reduce((acc, [, v]) => acc + v, 0);
+               if (entries.length === 0 || !sum) return { [rule.payerId]: ledgerAmount };
+               return Object.fromEntries(entries.map(([pid, v]) => [pid, (v / sum) * ledgerAmount]));
+            };
+
             const newTrans = {
-               totalAmount: transactionAmount, description: transDesc, category: rule.category, type: rule.type,
-               payers: rule.payers || { [rule.payerId]: transactionAmount },
-               splitDetails: rule.splitDetails || { [rule.payerId]: transactionAmount },
-               date: Timestamp.fromDate(new Date()), currency: 'TWD', isRecurring: true
+               totalAmount: ledgerAmount, description: transDesc, category: rule.category, type: rule.type,
+               payers: distribute(rule.payers),
+               splitDetails: distribute(rule.splitDetails),
+               date: Timestamp.fromDate(new Date()), currency: 'TWD',
+               sourceAmount: transactionAmount, sourceCurrency: amountCurrency,
+               exchangeRate: transactionAmount ? ledgerAmount / transactionAmount : 1,
+               isRecurring: true
             };
             await addDoc(collection(db, getCollectionPath(activeUid, currentGroupId, 'transactions')), newTrans);
 
             if (rule.linkedPlatformId && shouldUpdateCash) {
                const platformRef = doc(db, getCollectionPath(activeUid, null, 'platforms'), rule.linkedPlatformId);
-               await updateDoc(platformRef, { balance: increment(rule.amount) });
+               const platformSnap = await getDoc(platformRef);
+               const platformCurrency = platformSnap.exists() ? ((platformSnap.data() as Platform).currency || amountCurrency) : amountCurrency;
+               await updateDoc(platformRef, { balance: increment(convert(transactionAmount, amountCurrency, platformCurrency, currentRates)) });
             }
-
-            const interval = rule.intervalMonths || 1;
-            const nextMonth = new Date(nextDate);
-            nextMonth.setMonth(nextMonth.getMonth() + interval);
-            await updateDoc(doc(db, getCollectionPath(activeUid, currentGroupId, 'recurring'), rule.id), { nextDate: Timestamp.fromDate(nextMonth) });
          }
+      }
+      } finally {
+         recurringBusyRef.current = false;
       }
    };
 
@@ -346,8 +441,9 @@ export default function App() {
       
       if (lastDate !== today && historyAddedRef.current !== today) {
          historyAddedRef.current = today;
-         addDoc(collection(db, getCollectionPath(activeUid, null, 'history')), {
-            date: serverTimestamp(),
+         // Date-keyed doc id: a second device on the same day overwrites instead of adding a duplicate.
+         setDoc(doc(db, getCollectionPath(activeUid, null, 'history'), today), {
+            date: Timestamp.fromDate(new Date()),
             amount: totalNetWorth,
             currency: baseCurrency
          });
@@ -388,22 +484,74 @@ export default function App() {
    };
 
    const handleImport = async (data: any) => {
-      if (!activeUid || !data) return;
+      if (!activeUid || !data || typeof data !== 'object') { alert('備份檔格式無法辨識'); return; }
+
+      const collectionsInFile = [...PRIVATE_COLLECTIONS, ...GROUP_COLLECTIONS].filter(name => Array.isArray(data[name]) && data[name].length > 0);
+      if (collectionsInFile.length === 0) { alert('備份檔內沒有可還原的資料'); return; }
+
+      const fileGroupId = data.meta?.groupId;
+      const groupWarning = fileGroupId && fileGroupId !== currentGroupId ? '\n\n注意: 備份來自其他帳本，記帳資料將寫入目前帳本。' : '';
+      if (!window.confirm(`將還原 ${collectionsInFile.join(', ')}。\n相同 ID 的資料會被備份內容覆蓋。${groupWarning}\n\n確定繼續?`)) return;
+
       try {
-         for (const t of data.transactions || []) await addDoc(collection(db, getCollectionPath(activeUid, currentGroupId, 'transactions')), { ...t, date: t.date?.seconds ? Timestamp.fromDate(new Date(t.date.seconds * 1000)) : serverTimestamp() });
-         alert('匯入成功');
-      } catch (e) { console.error(e); alert('匯入失敗'); }
+         let batch = writeBatch(db);
+         let pending = 0;
+         let total = 0;
+         const flush = async () => { if (pending > 0) { await batch.commit(); batch = writeBatch(db); pending = 0; } };
+         const stage = async (ref: any, payload: any) => {
+            batch.set(ref, reviveTimestamps(payload));
+            pending++; total++;
+            if (pending >= 400) await flush();
+         };
+
+         const restore = async (path: string, docs: any[]) => {
+            for (const raw of docs || []) {
+               const { id, lots, ...rest } = raw;
+               // Reuse the original id so re-importing the same backup restores instead of duplicating.
+               const ref = id ? doc(db, path, id) : doc(collection(db, path));
+               await stage(ref, rest);
+               for (const lot of lots || []) {
+                  const { id: lotId, ...lotRest } = lot;
+                  await stage(lotId ? doc(db, path, ref.id, 'lots', lotId) : doc(collection(db, path, ref.id, 'lots')), lotRest);
+               }
+            }
+         };
+
+         for (const name of PRIVATE_COLLECTIONS) await restore(getCollectionPath(activeUid, null, name), data[name]);
+         for (const name of GROUP_COLLECTIONS) await restore(getCollectionPath(activeUid, currentGroupId, name), data[name]);
+         await flush();
+
+         setNotification(`匯入完成，共還原 ${total} 筆資料`);
+         setTimeout(() => setNotification(null), 4000);
+      } catch (e) { console.error(e); alert('匯入失敗，請確認備份檔內容'); }
    };
 
    const confirmDelete = (action: () => void, msg: string) => {
       setConfirmData({ title: '確認刪除', message: msg, action: () => { action(); setConfirmData(null); } });
    };
 
-   const exportData = () => {
-      const data = { meta: { generated: new Date() }, holdings, accounts, transactions, bankLogs, creditCards, people };
+   const exportData = async () => {
+      if (!activeUid) return;
+      // Include each holding's lots, otherwise a restore loses all cost basis history.
+      const holdingsWithLots = await Promise.all(holdings.map(async (h) => {
+         try {
+            const lotSnap = await getDocs(collection(db, getCollectionPath(activeUid, null, 'holdings'), h.id, 'lots'));
+            return { ...h, lots: lotSnap.docs.map(d => ({ id: d.id, ...d.data() })) };
+         } catch { return { ...h, lots: [] }; }
+      }));
+
+      const data = {
+         meta: { version: 2, generated: new Date().toISOString(), groupId: currentGroupId, baseCurrency },
+         platforms, holdings: holdingsWithLots, accounts, bankLogs, creditCards, cardLogs, history: historyData,
+         transactions, people, categories, recurring: recurringRules
+      };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `backup.json`; a.click();
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `wealthflow-backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
    };
 
    const exportCSV = () => {
@@ -413,7 +561,7 @@ export default function App() {
          const d = t.date?.seconds ? new Date(t.date.seconds * 1000).toISOString().split('T')[0] : '';
          return [d, t.description, t.category, t.type, t.totalAmount, t.currency, t.isRecurring ? 'Recurring' : ''];
       });
-      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const csvContent = [headers.join(','), ...rows.map(r => r.map(csvCell).join(','))].join('\n');
       const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url; a.download = `transactions_export.csv`; a.click();
@@ -533,6 +681,7 @@ export default function App() {
                      )}
                   </div>
                )}
+               <Suspense fallback={<PanelFallback />}>
                {dataReady && activeTab === 'home' && (
                   <div className="space-y-4 animate-in slide-in-from-bottom-4">
                      <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64"><h3 className="font-bold text-slate-700 text-sm mb-2 flex items-center gap-2"><LineChart size={16} /> 資產趨勢</h3>{chartsReady ? <NetWorthAreaChart data={historyChartData} /> : <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={24} /></div>}</div>
@@ -542,6 +691,7 @@ export default function App() {
                {dataReady && activeTab === 'invest' && <PortfolioView holdings={holdings} platforms={platforms} onAddPlatform={() => setActiveModal('add-platform')} onManagePlatform={() => setActiveModal('manage-platforms')} onManageCash={(p: any) => { setSelectedItem(p); setActiveModal('manage-cash') }} onAddAsset={() => setActiveModal('add-asset')} onUpdatePrices={() => updateAssetPrices(true)} onEdit={(h: any) => { setSelectedItem(h); setActiveModal('edit-asset-price') }} onSell={(h: any) => { setSelectedItem(h); setActiveModal('sell') }} onDividend={() => setActiveModal('add-dividend')} onRebalance={() => setActiveModal('rebalance')} baseCurrency={baseCurrency} rates={rates} convert={convert} CURRENCY_SYMBOLS={CURRENCY_SYMBOLS} />}
                {dataReady && activeTab === 'ledger' && <LedgerView transactions={transactions} categories={categories} people={people} cardLogs={cardLogs} onLoadMore={handleLoadMoreTransactions} onAdd={() => setActiveModal('add-trans')} onEdit={(t: any) => { setSelectedItem(t); setActiveModal('edit-trans') }} currentGroupId={currentGroupId} userId={user?.uid} onDelete={(id: string) => confirmDelete(async () => { const t = transactions.find(tx => tx.id === id); if (t?.linkedBankTransactionId) { await deleteDoc(doc(db, getCollectionPath(user!.uid, null, 'bankLogs'), t.linkedBankTransactionId)); } await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'transactions'), id)); }, '確定刪除此筆記帳資料?')} onManageRecurring={() => setActiveModal('manage-recurring')} onBatchAdd={() => setActiveModal('ai-batch')} />}
                {dataReady && activeTab === 'cash' && <CashView accounts={calculatedAccounts} creditCards={creditCards} onTransfer={() => setActiveModal('transfer')} onAddAccount={() => setActiveModal('add-account')} onManageAccount={() => setActiveModal('manage-accounts')} onAddCard={() => setActiveModal('add-card')} onManageCard={() => setActiveModal('manage-cards')} onViewAccount={(acc: any) => { setSelectedItem(acc); setActiveModal('view-bank') }} onViewCard={(card: any) => { setSelectedItem(card); setActiveModal('view-card') }} />}
+               </Suspense>
             </div>
          </main>
          <div className="fixed bottom-24 right-4 flex flex-col gap-3 z-40">
@@ -556,6 +706,7 @@ export default function App() {
                <NavBtn icon={<Wallet size={20} />} label="資金" active={activeTab === 'cash'} onClick={() => setActiveTab('cash')} />
             </div>
          </nav>
+         <Suspense fallback={<ModalFallback />}>
          {activeModal === 'settings' && <SettingsModal onClose={() => setActiveModal(null)} onExport={exportData} onExportCSV={exportCSV} onImport={handleImport} onGroupJoin={handleGroupJoin} onGroupCreate={handleCreateGroup} onGroupSwitch={handleSwitchGroup} currentGroupId={currentGroupId} groups={userGroups} user={user} categories={categories} onAddCategory={(name: string, type: string, budget: number) => addDoc(collection(db, getCollectionPath(user!.uid, currentGroupId, 'categories')), { name, type, budgetLimit: budget || 0 })} onUpdateCategory={(id: string, data: any) => updateDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id), data)} onDeleteCategory={(id: string) => confirmDelete(async () => await deleteDoc(doc(db, getCollectionPath(user!.uid, currentGroupId, 'categories'), id)), '確定刪除此分類? (需二次確認)')} currentTheme={themeColor} onSetTheme={setThemeColor} successAnimationType={successAnimationType} onSetAnimationType={handleSetAnimationType} />}
          {(activeModal === 'add-trans' || activeModal === 'edit-trans') && <AddTransactionModal userId={user?.uid} groupId={currentGroupId} people={people} categories={categories} onClose={() => { setActiveModal(null); setSelectedItem(null) }} editData={selectedItem} rates={rates} convert={convert} accounts={calculatedAccounts} successAnimationType={successAnimationType} />}
          {activeModal === 'ai-batch' && <AIBatchImportModal initialConfig={batchConfig} userId={user?.uid} groupId={currentGroupId} categories={categories} existingTransactions={transactions} accounts={accounts} creditCards={creditCards} existingBankLogs={bankLogs} existingCardLogs={cardLogs} people={people} onClose={() => { setActiveModal(null); setBatchConfig(null); }} />}
@@ -579,6 +730,7 @@ export default function App() {
          {activeModal === 'view-card' && selectedItem && <CardDetailModal userId={user?.uid} card={selectedItem} cardLogs={cardLogs.filter(l => l.cardId === selectedItem.id)} allCardLogs={cardLogs} transactions={transactions} onClose={() => { setActiveModal(null); setSelectedItem(null) }} groups={userGroups} currentGroupId={currentGroupId} />}
          {showAI && <AIAssistantModal onClose={() => setShowAI(false)} contextData={{ totalNetWorth, holdings, transactions }} />}
          {confirmData && <ConfirmActionModal title={confirmData.title} message={confirmData.message} onConfirm={confirmData.action} onCancel={() => setConfirmData(null)} />}
+         </Suspense>
       </div>
    );
 }

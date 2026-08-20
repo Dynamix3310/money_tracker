@@ -1,6 +1,8 @@
 
-import { GoogleGenAI } from "@google/genai";
 import { getAuth } from "firebase/auth";
+
+// The SDK is imported on demand: only sessions that actually use AI pay for downloading it.
+const loadGenAI = async () => (await import("@google/genai")).GoogleGenAI;
 
 // Declare process to avoid TS errors if not defined in types
 declare var process: {
@@ -60,6 +62,7 @@ export async function callGemini(prompt: string, imageBase64?: string) {
   }
 
   try {
+    const GoogleGenAI = await loadGenAI();
     const ai = new GoogleGenAI({ apiKey });
     const modelId = 'gemini-2.5-flash';
 
@@ -121,6 +124,7 @@ export async function fetchPriceWithAI(symbol: string): Promise<number | null> {
   if (!apiKey) return null;
 
   try {
+    const GoogleGenAI = await loadGenAI();
     const ai = new GoogleGenAI({ apiKey });
     // Using googleSearch tool
     const response = await ai.models.generateContent({
