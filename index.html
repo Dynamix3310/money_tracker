@@ -83,6 +83,38 @@
       animation-name: zoomIn;
     }
 
+    @keyframes slideInRight {
+      from {
+        opacity: 0;
+        transform: translateX(8px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    @keyframes slideInLeft {
+      from {
+        opacity: 0;
+        transform: translateX(-8px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    .slide-in-from-right-2 {
+      animation-name: slideInRight;
+    }
+
+    .slide-in-from-left-2 {
+      animation-name: slideInLeft;
+    }
+
     /* Chart Tooltip Overrides */
     .recharts-tooltip-wrapper {
       outline: none;

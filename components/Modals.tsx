@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon, FileSpreadsheet, AlertTriangle, CheckSquare, Square, DollarSign, Clock, Calendar, PieChart, TrendingUp, Layers, Scale, ArrowRight, ChevronDown, Coins, History } from 'lucide-react';
+import { X, Download, Share2, Trash2, Camera, Loader2, ArrowUpRight, ArrowDownRight, Sparkles, Send, CheckCircle, Circle, Link as LinkIcon, Link2, Upload, ArrowRightLeft, Save, RefreshCw, Building2, Wallet, Landmark, Edit, Key, Settings, Repeat, AlertCircle, FileText, Image as ImageIcon, CreditCard, Copy, LogOut, Users, Split, Calculator, Wand2, PlusIcon, FileSpreadsheet, AlertTriangle, CheckSquare, Square, DollarSign, Clock, Calendar, PieChart, TrendingUp, Layers, Scale, ArrowRight, ChevronDown, ChevronLeft, ChevronRight, Coins, History } from 'lucide-react';
 import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog, Transaction, ChatMessage, BankAccount, InvestmentLot, Group } from '../types';
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc, getDocs, query, orderBy, where, increment, getDoc, writeBatch } from 'firebase/firestore';
 import { db, getCollectionPath, auth, getUserProfilePath } from '../services/firebase';
 import { callGemini } from '../services/gemini';
+import { evaluateExpression, isExpression } from '../utils/calc';
 import confetti from 'canvas-confetti';
 
 const styles = {
@@ -392,14 +393,175 @@ export const PortfolioRebalanceModal = ({ holdings, platforms, rates, baseCurren
 };
 
 // --- AddTransactionModal (With Auto-Balancing) ---
+// --- Swipeable Person Picker ---
+// Most ledgers only have two members, so swiping left/right (or tapping one arrow)
+// switches the payer in a single gesture instead of opening a dropdown list.
+export const PersonSwitcher = ({ people, value, onChange, hint }: any) => {
+    const touchStartX = useRef<number | null>(null);
+    const [dir, setDir] = useState<'left' | 'right'>('right');
+
+    if (!people || people.length === 0) return null;
+
+    const index = Math.max(0, people.findIndex((p: any) => p.id === value));
+    const current = people[index];
+
+    const move = (step: number) => {
+        if (people.length < 2) return;
+        setDir(step > 0 ? 'right' : 'left');
+        onChange(people[(index + step + people.length) % people.length].id);
+    };
+
+    const handleTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
+    const handleTouchEnd = (e: React.TouchEvent) => {
+        if (touchStartX.current === null) return;
+        const delta = e.changedTouches[0].clientX - touchStartX.current;
+        touchStartX.current = null;
+        if (Math.abs(delta) > 40) move(delta < 0 ? 1 : -1);
+    };
+
+    return (
+        <div className="select-none" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+            <div className="flex items-center bg-white rounded-xl ring-1 ring-slate-200 overflow-hidden">
+                <button type="button" onClick={() => move(-1)} disabled={people.length < 2} className="p-3 text-slate-400 hover:text-indigo-600 disabled:opacity-30 active:scale-90 transition-all"><ChevronLeft size={18} /></button>
+                <div className="flex-1 min-w-0 text-center py-2">
+                    <div key={current?.id} className={`font-bold text-slate-800 truncate animate-in fade-in ${dir === 'right' ? 'slide-in-from-right-2' : 'slide-in-from-left-2'}`}>{current?.name || '—'}</div>
+                    {people.length > 1 && (
+                        <div className="flex justify-center gap-1 mt-1.5">
+                            {people.map((p: any, i: number) => <span key={p.id} className={`h-1 rounded-full transition-all ${i === index ? 'w-4 bg-indigo-500' : 'w-1 bg-slate-300'}`} />)}
+                        </div>
+                    )}
+                </div>
+                <button type="button" onClick={() => move(1)} disabled={people.length < 2} className="p-3 text-slate-400 hover:text-indigo-600 disabled:opacity-30 active:scale-90 transition-all"><ChevronRight size={18} /></button>
+            </div>
+            {people.length > 1 && <div className="text-[10px] text-slate-400 text-center mt-1">左右滑動切換{hint || '人選'}</div>}
+        </div>
+    );
+};
+
+// --- Calendar Date + Time Field ---
+// Replaces <input type="datetime-local">, which mobile browsers render as a scroll wheel.
+const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
+const toDateTimeLocal = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+const isSameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+export const DateTimeField = ({ value, onChange }: any) => {
+    const [open, setOpen] = useState(false);
+    const selected = useMemo(() => { const d = new Date(value); return isNaN(d.getTime()) ? new Date() : d; }, [value]);
+    const [cursor, setCursor] = useState(() => new Date(selected.getFullYear(), selected.getMonth(), 1));
+
+    useEffect(() => { setCursor(new Date(selected.getFullYear(), selected.getMonth(), 1)); }, [selected.getFullYear(), selected.getMonth()]);
+
+    const cells = useMemo(() => {
+        const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+        const leading = new Date(cursor.getFullYear(), cursor.getMonth(), 1).getDay();
+        const list: (Date | null)[] = Array(leading).fill(null);
+        for (let d = 1; d <= daysInMonth; d++) list.push(new Date(cursor.getFullYear(), cursor.getMonth(), d));
+        return list;
+    }, [cursor]);
+
+    const commit = (d: Date) => onChange(toDateTimeLocal(d));
+    const shiftMonth = (step: number) => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + step, 1));
+
+    const pickDay = (day: Date) => {
+        const next = new Date(day);
+        next.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+        commit(next);
+    };
+
+    const pickRelativeDay = (offset: number) => {
+        const next = new Date();
+        next.setDate(next.getDate() + offset);
+        next.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+        commit(next);
+    };
+
+    const shiftTime = (part: 'h' | 'm', step: number) => {
+        const next = new Date(selected);
+        if (part === 'h') next.setHours((next.getHours() + step + 24) % 24);
+        else next.setMinutes((next.getMinutes() + step + 60) % 60);
+        commit(next);
+    };
+
+    const setTimePart = (part: 'h' | 'm', raw: string) => {
+        const num = parseInt(raw, 10);
+        if (isNaN(num)) return;
+        const next = new Date(selected);
+        if (part === 'h') next.setHours(Math.max(0, Math.min(23, num)));
+        else next.setMinutes(Math.max(0, Math.min(59, num)));
+        commit(next);
+    };
+
+    const today = new Date();
+
+    return (
+        <div>
+            <button type="button" onClick={() => setOpen(o => !o)} className={`${styles.input} flex items-center justify-between gap-2 text-left ${open ? 'ring-2 ring-indigo-500 bg-white' : ''}`}>
+                <span className="flex items-center gap-2 font-bold text-sm text-slate-800"><Calendar size={16} className="text-indigo-500" />{`${selected.getFullYear()}/${pad2(selected.getMonth() + 1)}/${pad2(selected.getDate())} (${WEEKDAY_LABELS[selected.getDay()]})`}</span>
+                <span className="flex items-center gap-1 text-sm font-bold text-slate-500"><Clock size={14} />{`${pad2(selected.getHours())}:${pad2(selected.getMinutes())}`}</span>
+            </button>
+
+            {open && (
+                <div className="mt-2 bg-white rounded-xl ring-1 ring-slate-200 p-3 shadow-sm animate-in fade-in slide-in-from-bottom-4">
+                    <div className="flex items-center justify-between mb-2">
+                        <button type="button" onClick={() => shiftMonth(-1)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-indigo-600"><ChevronLeft size={18} /></button>
+                        <div className="font-bold text-sm text-slate-700">{cursor.getFullYear()} 年 {cursor.getMonth() + 1} 月</div>
+                        <button type="button" onClick={() => shiftMonth(1)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-indigo-600"><ChevronRight size={18} /></button>
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-1 mb-1">
+                        {WEEKDAY_LABELS.map((w, i) => <div key={w} className={`text-center text-[10px] font-bold py-1 ${i === 0 || i === 6 ? 'text-rose-400' : 'text-slate-400'}`}>{w}</div>)}
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-1">
+                        {cells.map((day, i) => {
+                            if (!day) return <div key={`blank-${i}`} />;
+                            const active = isSameDay(day, selected);
+                            const isToday = isSameDay(day, today);
+                            return (
+                                <button key={day.toISOString()} type="button" onClick={() => pickDay(day)}
+                                    className={`aspect-square rounded-lg text-sm font-bold transition-all active:scale-90 ${active ? 'bg-indigo-600 text-white shadow' : isToday ? 'bg-indigo-50 text-indigo-600' : 'text-slate-600 hover:bg-slate-100'}`}>
+                                    {day.getDate()}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    <div className="flex gap-2 mt-3">
+                        <button type="button" onClick={() => pickRelativeDay(0)} className="flex-1 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200">今天</button>
+                        <button type="button" onClick={() => pickRelativeDay(-1)} className="flex-1 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200">昨天</button>
+                        <button type="button" onClick={() => pickRelativeDay(-2)} className="flex-1 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200">前天</button>
+                    </div>
+
+                    <div className="flex items-center justify-center gap-3 mt-3 pt-3 border-t border-slate-100">
+                        <Clock size={14} className="text-slate-400" />
+                        {(['h', 'm'] as const).map((part, idx) => (
+                            <React.Fragment key={part}>
+                                {idx === 1 && <span className="font-bold text-slate-400">:</span>}
+                                <div className="flex flex-col items-center">
+                                    <button type="button" onClick={() => shiftTime(part, 1)} className="text-slate-300 hover:text-indigo-600 leading-none">▲</button>
+                                    <input type="number" inputMode="numeric" value={part === 'h' ? pad2(selected.getHours()) : pad2(selected.getMinutes())} onChange={e => setTimePart(part, e.target.value)}
+                                        className="w-12 text-center text-lg font-bold bg-slate-50 rounded-lg py-1 outline-none focus:ring-2 focus:ring-indigo-500" />
+                                    <button type="button" onClick={() => shiftTime(part, -1)} className="text-slate-300 hover:text-indigo-600 leading-none">▼</button>
+                                </div>
+                            </React.Fragment>
+                        ))}
+                        <button type="button" onClick={() => commit(new Date())} className="ml-2 px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200">現在</button>
+                        <button type="button" onClick={() => setOpen(false)} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700">完成</button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 export const AddTransactionModal = ({ userId, groupId, people, categories, onClose, editData, rates, convert, accounts, successAnimationType }: any) => {
     const [type, setType] = useState<'expense' | 'income'>(editData?.type || 'expense');
     const [amount, setAmount] = useState(editData?.sourceAmount?.toString() || editData?.totalAmount?.toString() || '');
     const [currency, setCurrency] = useState(editData?.sourceCurrency || editData?.currency || 'TWD');
     const [description, setDescription] = useState(editData?.description || '');
     const [category, setCategory] = useState(editData?.category || '');
-    const formatDateTimeLocal = (dateObj: Date) => new Date(dateObj.getTime() - dateObj.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-    const [date, setDate] = useState(editData?.date?.seconds ? formatDateTimeLocal(new Date(editData.date.seconds * 1000)) : formatDateTimeLocal(new Date()));
+    const [date, setDate] = useState(editData?.date?.seconds ? toDateTimeLocal(new Date(editData.date.seconds * 1000)) : toDateTimeLocal(new Date()));
     const [payerMode, setPayerMode] = useState<'single' | 'multi'>('single');
     const [splitMode, setSplitMode] = useState<'equal' | 'custom' | 'single'>('single');
     const [isRecurring, setIsRecurring] = useState(false);
@@ -415,7 +577,12 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
     const currentCats = useMemo(() => categories.filter((c: any) => c.type === type).sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [categories, type]);
     useEffect(() => { if (currentCats.length > 0 && !category) setCategory(currentCats[0].name); }, [type, categories]);
 
-    const rawAmount = parseFloat(amount) || 0;
+    // Amount accepts arithmetic ("120+35*2"), so the value comes from the evaluator.
+    const expressionValue = useMemo(() => evaluateExpression(amount), [amount]);
+    const showCalc = useMemo(() => isExpression(amount) && amount.trim() !== '', [amount]);
+    const rawAmount = expressionValue ?? 0;
+    const appendToAmount = (op: string) => setAmount((prev: string) => prev + op);
+    const commitExpression = () => { if (showCalc && expressionValue !== null) setAmount(String(expressionValue)); };
     const convertedAmount = useMemo(() => (currency === 'TWD' || !rates) ? rawAmount : convert(rawAmount, currency, 'TWD', rates), [rawAmount, currency, rates, convert]);
     const finalAmt = convertedAmount;
     const payerSum = payerMode === 'single' ? finalAmt : Object.values(multiPayers).reduce((acc: number, val: any) => acc + (parseFloat(val as string) || 0), 0);
@@ -449,9 +616,10 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
         setCustomSplits(newMap);
     };
 
-    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; setLoadingAI(true); const reader = new FileReader(); reader.onloadend = async () => { try { const prompt = `Analyze receipt. Extract totalAmount, currency, date, description, category. Return JSON.`; const resultText = await callGemini(prompt, reader.result as string); const json = JSON.parse(resultText.replace(/```json/g, '').replace(/```/g, '')); if (json.totalAmount) setAmount(json.totalAmount); if (json.currency) setCurrency(json.currency); if (json.description) setDescription(json.description); if (json.category) setCategory(json.category); if (json.date) setDate(json.date); } catch (err) { alert("AI Error"); } finally { setLoadingAI(false); } }; reader.readAsDataURL(file); };
+    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; setLoadingAI(true); const reader = new FileReader(); reader.onloadend = async () => { try { const prompt = `Analyze receipt. Extract totalAmount, currency, date, description, category. Return JSON.`; const resultText = await callGemini(prompt, reader.result as string); const json = JSON.parse(resultText.replace(/```json/g, '').replace(/```/g, '')); if (json.totalAmount) setAmount(String(json.totalAmount)); if (json.currency) setCurrency(json.currency); if (json.description) setDescription(json.description); if (json.category) setCategory(json.category); if (json.date) setDate(json.date); } catch (err) { alert("AI Error"); } finally { setLoadingAI(false); } }; reader.readAsDataURL(file); };
     const handleSave = async () => {
         if (!amount || !description) return;
+        if (expressionValue === null) { alert('金額算式無法計算，請檢查輸入'); return; }
         if (type === 'expense' && (Math.abs(payerSum - finalAmt) > 1 || Math.abs(splitSum - finalAmt) > 1 && splitMode !== 'single')) { alert('金額不符'); return; }
 
         let payers: any = {};
@@ -478,7 +646,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
             }
         }
 
-        const data: any = { totalAmount: finalAmt, description, category, type, payers, splitDetails: splits, date: Timestamp.fromDate(new Date(date)), currency: 'TWD', sourceAmount: parseFloat(amount), sourceCurrency: currency, exchangeRate: currency === 'TWD' ? 1 : (finalAmt / parseFloat(amount)), linkedBankAccountId: (isFromBank && selectedAccountId) ? selectedAccountId : null };
+        const data: any = { totalAmount: finalAmt, description, category, type, payers, splitDetails: splits, date: Timestamp.fromDate(new Date(date)), currency: 'TWD', sourceAmount: rawAmount, sourceCurrency: currency, exchangeRate: (currency === 'TWD' || !rawAmount) ? 1 : (finalAmt / rawAmount), linkedBankAccountId: (isFromBank && selectedAccountId) ? selectedAccountId : null };
         const col = collection(db, getCollectionPath(userId, groupId, 'transactions'));
         let transId = editData?.id;
         if (editData) {
@@ -490,7 +658,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
 
         if (isFromBank && selectedAccountId) {
             const bankLogsCol = collection(db, getCollectionPath(userId, null, 'bankLogs'));
-            const bankAmount = parseFloat(amount) || 0;
+            const bankAmount = rawAmount;
             const bankLogData = {
                 accountId: selectedAccountId,
                 type: type === 'expense' ? 'out' : 'in',
@@ -657,12 +825,35 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
             <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-xl">{editData ? '編輯' : '記一筆'}</h3>{!editData && <label className="cursor-pointer bg-indigo-50 text-indigo-600 px-3 py-1 rounded text-xs font-bold flex items-center gap-1">{loadingAI ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />} AI <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={loadingAI} /></label>}</div>
             <div className="space-y-4">
                 <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={() => setType('expense')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'expense' ? 'bg-white shadow text-red-500' : 'text-slate-400'}`}>支出</button><button onClick={() => setType('income')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'income' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>收入</button></div>
-                <div><label className={styles.label}>金額</label><div className="flex gap-2 items-center"><select className="bg-slate-100 rounded-lg p-2 text-sm font-bold outline-none" value={currency} onChange={e => setCurrency(e.target.value)}><option value="TWD">TWD</option><option value="USD">USD</option><option value="JPY">JPY</option></select><input type="number" className="text-3xl font-bold w-full text-right border-b pb-2 outline-none bg-transparent" value={amount} onChange={e => setAmount(e.target.value)} /></div>{currency !== 'TWD' && amount && <div className="text-right text-xs text-slate-400 mt-1 font-bold">≈ NT$ {Math.round(convertedAmount).toLocaleString()}</div>}</div>
-                {type === 'expense' && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>付款人</label>{people.length > 1 && (<div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setPayerMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'single' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>單人</button><button onClick={() => setPayerMode('multi')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'multi' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>多人</button></div>)}</div>{payerMode === 'single' ? (<select className={styles.input} value={mainPayerId} onChange={e => setMainPayerId(e.target.value)}>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={multiPayers[p.id] || ''} onChange={e => handlePayerChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, multiPayers, setMultiPayers)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>)}
-                {type === 'income' && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><label className={styles.label}>收入歸屬 (誰賺的?)</label><select className={styles.input} value={mainPayerId} onChange={e => setMainPayerId(e.target.value)}>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>)}
-                {type === 'expense' && people.length > 1 && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>分帳</label><div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setSplitMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'single' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>單人</button><button onClick={() => setSplitMode('custom')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'custom' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>自訂</button><button onClick={() => setSplitMode('equal')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'equal' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>平分</button></div></div>{splitMode === 'equal' ? (<div className="text-center text-xs text-slate-500 py-2">每人約 <span className="font-bold text-indigo-600">${(finalAmt / people.length).toFixed(1)}</span></div>) : splitMode === 'single' ? (<select className={styles.input} value={singleSplitPayerId || people[0]?.id} onChange={e => setSingleSplitPayerId(e.target.value)}>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={customSplits[p.id] || ''} onChange={e => handleSplitChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, customSplits, setCustomSplits)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>)}
+                <div>
+                    <label className={styles.label}>金額</label>
+                    <div className="flex gap-2 items-center">
+                        <select className="bg-slate-100 rounded-lg p-2 text-sm font-bold outline-none" value={currency} onChange={e => setCurrency(e.target.value)}><option value="TWD">TWD</option><option value="USD">USD</option><option value="JPY">JPY</option></select>
+                        <input type="text" inputMode="decimal" placeholder="0" className="text-3xl font-bold w-full text-right border-b pb-2 outline-none bg-transparent" value={amount} onChange={e => setAmount(e.target.value)} onBlur={commitExpression} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitExpression(); } }} />
+                    </div>
+                    <div className="flex gap-1.5 mt-2">
+                        {['+', '-', '*', '/'].map(op => (
+                            <button key={op} type="button" onClick={() => appendToAmount(op)} className="flex-1 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-bold text-sm hover:bg-slate-200 active:scale-95 transition-all">{op === '*' ? '×' : op === '/' ? '÷' : op}</button>
+                        ))}
+                        <button type="button" onClick={() => setAmount((prev: string) => prev.slice(0, -1))} className="flex-1 py-1.5 rounded-lg bg-slate-100 text-slate-500 font-bold text-sm hover:bg-slate-200 active:scale-95 transition-all">⌫</button>
+                        <button type="button" onClick={() => setAmount('')} className="flex-1 py-1.5 rounded-lg bg-slate-100 text-slate-500 font-bold text-sm hover:bg-slate-200 active:scale-95 transition-all">C</button>
+                    </div>
+                    {showCalc && (
+                        <div className="text-right text-xs mt-1.5 font-bold flex items-center justify-end gap-1">
+                            <Calculator size={12} className={expressionValue === null ? 'text-slate-400' : 'text-indigo-500'} />
+                            {expressionValue === null
+                                ? <span className="text-slate-400">算式尚未完成</span>
+                                : <button type="button" onClick={commitExpression} className="text-indigo-600">= {expressionValue.toLocaleString()}</button>}
+                        </div>
+                    )}
+                    {currency !== 'TWD' && rawAmount > 0 && <div className="text-right text-xs text-slate-400 mt-1 font-bold">≈ NT$ {Math.round(convertedAmount).toLocaleString()}</div>}
+                </div>
+                {type === 'expense' && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>付款人</label>{people.length > 1 && (<div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setPayerMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'single' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>單人</button><button onClick={() => setPayerMode('multi')} className={`px-2 py-0.5 text-[10px] rounded-md ${payerMode === 'multi' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>多人</button></div>)}</div>{payerMode === 'single' ? (<PersonSwitcher people={people} value={mainPayerId} onChange={setMainPayerId} hint="付款人" />) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={multiPayers[p.id] || ''} onChange={e => handlePayerChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, multiPayers, setMultiPayers)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>)}
+                {type === 'income' && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><label className={styles.label}>收入歸屬 (誰賺的?)</label><PersonSwitcher people={people} value={mainPayerId} onChange={setMainPayerId} hint="歸屬人" /></div>)}
+                {type === 'expense' && people.length > 1 && (<div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex justify-between items-center mb-2"><label className={styles.label}>分帳</label><div className="flex bg-white border rounded-lg p-0.5"><button onClick={() => setSplitMode('single')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'single' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>單人</button><button onClick={() => setSplitMode('custom')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'custom' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>自訂</button><button onClick={() => setSplitMode('equal')} className={`px-2 py-0.5 text-[10px] rounded-md ${splitMode === 'equal' ? 'bg-indigo-50 text-indigo-600 font-bold' : 'text-slate-400'}`}>平分</button></div></div>{splitMode === 'equal' ? (<div className="text-center text-xs text-slate-500 py-2">每人約 <span className="font-bold text-indigo-600">${(finalAmt / people.length).toFixed(1)}</span></div>) : splitMode === 'single' ? (<PersonSwitcher people={people} value={singleSplitPayerId || people[0]?.id} onChange={setSingleSplitPayerId} hint="分帳人" />) : (<div className="space-y-2">{people.map((p: any) => (<div key={p.id} className="flex items-center gap-2"><span className="text-sm w-16 truncate">{p.name}</span><input type="number" placeholder="0" className="flex-1 p-2 rounded border text-sm" value={customSplits[p.id] || ''} onChange={e => handleSplitChange(p.id, e.target.value)} />{people.length > 2 && (<button onClick={() => fillRemainder(p.id, customSplits, setCustomSplits)} className="p-2 text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100"><Wand2 size={14} /></button>)}</div>))}</div>)}</div>)}
                 <div><label className={styles.label}>說明</label><input className={styles.input} value={description} onChange={e => setDescription(e.target.value)} /></div>
-                <div className="grid grid-cols-2 gap-3"><div><label className={styles.label}>日期與時間</label><input type="datetime-local" className={`${styles.input} text-xs leading-none h-[42px]`} value={date} onChange={e => setDate(e.target.value)} /></div><div><label className={styles.label}>分類</label><select className={styles.input} value={category} onChange={e => setCategory(e.target.value)}>{currentCats.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div></div>
+                <div><label className={styles.label}>日期與時間</label><DateTimeField value={date} onChange={setDate} /></div>
+                <div><label className={styles.label}>分類</label><select className={styles.input} value={category} onChange={e => setCategory(e.target.value)}>{currentCats.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div>
                 {accounts && accounts.length > 0 && (
                     <div className="flex items-center gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
                         <input type="checkbox" id="isFromBank" checked={isFromBank} onChange={e => setIsFromBank(e.target.checked)} className="w-5 h-5 text-indigo-600 rounded" />
