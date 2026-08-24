@@ -6,6 +6,7 @@ import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateD
 import { db, getCollectionPath, auth, getUserProfilePath } from '../services/firebase';
 import { callGemini } from '../services/gemini';
 import { evaluateExpression, isExpression } from '../utils/calc';
+import { ALLOWED_CURRENCIES, PLATFORM_CURRENCIES } from '../constants';
 import confetti from 'canvas-confetti';
 
 const styles = {
@@ -190,7 +191,7 @@ export const AddRecurringModal = ({ userId, groupId, people, categories, onClose
             <div className="space-y-4">
                 <div className="flex bg-slate-100 p-1 rounded-xl"><button onClick={() => setType('expense')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'expense' ? 'bg-white shadow text-red-500' : 'text-slate-400'}`}>支出</button><button onClick={() => setType('income')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${type === 'income' ? 'bg-white shadow text-emerald-600' : 'text-slate-400'}`}>收入</button></div>
                 <div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e => setName(e.target.value)} placeholder="例如: 房租" /></div>
-                <div><label className={styles.label}>金額</label><div className="flex gap-2"><select className="bg-slate-100 rounded-xl px-3 text-sm font-bold outline-none" value={currency} onChange={e => setCurrency(e.target.value)}><option value="TWD">TWD</option><option value="USD">USD</option><option value="JPY">JPY</option></select><input type="number" className={`${styles.input} flex-1`} value={amount} onChange={e => setAmount(e.target.value)} /></div>{currency !== 'TWD' && <div className="text-[10px] text-slate-400 mt-1 ml-1">自動記帳時依當下匯率換算成 TWD</div>}</div>
+                <div><label className={styles.label}>金額</label><div className="flex gap-2"><select className="bg-slate-100 rounded-xl px-3 text-sm font-bold outline-none" value={currency} onChange={e => setCurrency(e.target.value)}>{ALLOWED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select><input type="number" className={`${styles.input} flex-1`} value={amount} onChange={e => setAmount(e.target.value)} /></div>{currency !== 'TWD' && <div className="text-[10px] text-slate-400 mt-1 ml-1">自動記帳時依當下匯率換算成 TWD</div>}</div>
                 <div className="grid grid-cols-2 gap-3">
                     <div><label className={styles.label}>分類</label><select className={styles.input} value={category} onChange={e => setCategory(e.target.value)}>{currentCats.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div>
                     <div><label className={styles.label}>成員</label><select className={styles.input} value={payerId} onChange={e => setPayerId(e.target.value)}>{people.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
@@ -915,7 +916,7 @@ export const AddTransactionModal = ({ userId, groupId, people, categories, onClo
                 <div>
                     <label className={styles.label}>金額</label>
                     <div className="flex gap-2 items-center">
-                        <select className="bg-slate-100 rounded-lg p-2 text-sm font-bold outline-none" value={currency} onChange={e => setCurrency(e.target.value)}><option value="TWD">TWD</option><option value="USD">USD</option><option value="JPY">JPY</option></select>
+                        <select className="bg-slate-100 rounded-lg p-2 text-sm font-bold outline-none" value={currency} onChange={e => setCurrency(e.target.value)}>{ALLOWED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select>
                         <input type="text" inputMode="decimal" placeholder="0" className="text-3xl font-bold w-full text-right border-b pb-2 outline-none bg-transparent" value={amount} onChange={e => setAmount(e.target.value)} onBlur={commitExpression} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitExpression(); } }} />
                     </div>
                     <div className="flex gap-1.5 mt-2">
@@ -972,7 +973,7 @@ export const AddPlatformModal = ({ userId, onClose, editData }: any) => {
         if (editData) await updateDoc(doc(col, editData.id), data); else await addDoc(col, data);
         onClose();
     };
-    return (<div className={styles.overlay} {...chrome}><div className={styles.content}><h3 className="font-bold text-xl mb-4">{editData ? '編輯平台' : '新增平台'}</h3><div className="space-y-4"><div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e => setName(e.target.value)} /></div><div className="grid grid-cols-2 gap-3"><div><label className={styles.label}>類型</label><select className={styles.input} value={type} onChange={e => setType(e.target.value)}><option value="stock">證券</option><option value="crypto">加密</option></select></div><div><label className={styles.label}>幣別</label><select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value)}><option>USD</option><option>TWD</option><option>JPY</option><option>USDT</option></select></div></div><div><label className={styles.label}>現金餘額</label><input type="number" className={styles.input} value={balance} onChange={e => setBalance(e.target.value)} /></div><div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><SubmitButton onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</SubmitButton></div></div></div></div>);
+    return (<div className={styles.overlay} {...chrome}><div className={styles.content}><h3 className="font-bold text-xl mb-4">{editData ? '編輯平台' : '新增平台'}</h3><div className="space-y-4"><div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e => setName(e.target.value)} /></div><div className="grid grid-cols-2 gap-3"><div><label className={styles.label}>類型</label><select className={styles.input} value={type} onChange={e => setType(e.target.value)}><option value="stock">證券</option><option value="crypto">加密</option></select></div><div><label className={styles.label}>幣別</label><select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value)}>{PLATFORM_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div></div><div><label className={styles.label}>現金餘額</label><input type="number" className={styles.input} value={balance} onChange={e => setBalance(e.target.value)} /></div><div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button><SubmitButton onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</SubmitButton></div></div></div></div>);
 };
 
 export const ManagePlatformCashModal = ({ platform, userId, onClose }: any) => {
@@ -1537,7 +1538,7 @@ export const AddAccountModal = ({ userId, onClose, editData }: any) => {
             <div className="space-y-4">
                 <div><label className={styles.label}>名稱</label><input className={styles.input} value={name} onChange={e => setName(e.target.value)} /></div>
                 <div className="grid grid-cols-2 gap-3">
-                    <div><label className={styles.label}>幣別</label><select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value)}><option>TWD</option><option>USD</option><option>JPY</option></select></div>
+                    <div><label className={styles.label}>幣別</label><select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value)}>{ALLOWED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
                     <div><label className={styles.label}>初始餘額</label><input type="number" className={styles.input} value={initialBalance} onChange={e => setInitialBalance(e.target.value)} /></div>
                 </div>
                 <div className="flex gap-3"><button onClick={onClose} className={styles.btnSecondary}>取消</button><SubmitButton onClick={handleSave} className={`${styles.btnPrimary} flex-1`}>儲存</SubmitButton></div>
@@ -1918,7 +1919,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                    RETURN ONLY RAW JSON. NO DESCRIPTION. NO MARKDOWN.
                    - description: Seller Name or Item Name
                    - amount: Number (FIND THE TOTAL/FINAL AMOUNT. Remove currency symbols, handle commas)
-                   - currency: string (If currency is obvious like $, USD, ¥, JPY, NT$, TWD, return standard code: 'TWD', 'USD', 'JPY'. Default to 'TWD')
+                   - currency: string (If currency is obvious like $, USD, ¥, JPY, ₩, KRW, NT$, TWD, return standard code: 'TWD', 'USD', 'JPY', 'KRW'. Default to 'TWD')
                    - date: YYYY-MM-DD (If missing year, use current year ${new Date().getFullYear()})
                    - type: 'expense' (default) or 'income' (if strictly implies income)
                    - category: Choose closest match from [${categories.map((c: any) => c.name).join(', ')}] based on seller/item.
@@ -2158,9 +2159,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                                         }
                                     }} className="text-xs bg-slate-100 text-slate-600 border border-slate-200 rounded p-1 outline-none">
                                         <option value="">批次套用幣別...</option>
-                                        <option value="TWD">全部套用 TWD</option>
-                                        <option value="USD">全部套用 USD</option>
-                                        <option value="JPY">全部套用 JPY</option>
+                                        {ALLOWED_CURRENCIES.map(c => <option key={c} value={c}>{`全部套用 ${c}`}</option>)}
                                     </select>
                                 )}
                                 <button onClick={() => setParsedItems([])} className="text-sm text-indigo-600 font-bold hover:text-indigo-800 transition-colors">重新上傳</button>
@@ -2185,7 +2184,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                                             <input type="date" value={item.date} onChange={e => { const n = [...parsedItems]; n[idx].date = e.target.value; setParsedItems(n) }} className="text-xs text-slate-400 bg-transparent" />
                                             {target === 'ledger' && (<select value={item.category} onChange={e => { const n = [...parsedItems]; n[idx].category = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1 max-w-[80px]">{categories.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select>)}
                                             {(target === 'bank' || target === 'ledger') && (<select value={item.type} onChange={e => { const n = [...parsedItems]; n[idx].type = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{target === 'ledger' ? <><option value="expense">支出</option><option value="income">收入</option></> : <><option value="out">支出</option><option value="in">收入</option></>}</select>)}
-                                            {target === 'ledger' && (<select value={item.currency || 'TWD'} onChange={e => { const n = [...parsedItems]; n[idx].currency = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1"><option value="TWD">TWD</option><option value="USD">USD</option><option value="JPY">JPY</option></select>)}
+                                            {target === 'ledger' && (<select value={item.currency || 'TWD'} onChange={e => { const n = [...parsedItems]; n[idx].currency = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{ALLOWED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select>)}
                                         </div>
                                     </div>
                                     <button onClick={() => { setParsedItems(parsedItems.filter((_, i) => i !== idx)) }} className="text-slate-300 hover:text-red-500"><Trash2 size={16} /></button>

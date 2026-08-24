@@ -35,9 +35,7 @@ const AddDividendModal = lazy(() => import('./components/Modals').then(m => ({ d
 const PortfolioRebalanceModal = lazy(() => import('./components/Modals').then(m => ({ default: m.PortfolioRebalanceModal })));
 import { AssetHolding, Platform, BankAccount, BankTransaction, CreditCardInfo, CreditCardLog, Transaction, Person, Category, RecurringRule, NetWorthHistory, Group } from './types';
 import { AuthScreen } from './components/Auth';
-
-const CURRENCY_SYMBOLS: Record<string, string> = { 'TWD': 'NT$', 'USD': '$', 'JPY': '¥', 'EUR': '€', 'CNY': '¥' };
-const ALLOWED_CURRENCIES = ['TWD', 'USD', 'JPY'];
+import { CURRENCY_SYMBOLS, ALLOWED_CURRENCIES, FALLBACK_RATES } from './constants';
 
 const THEME_COLORS: any = {
    'indigo': { 50: '#eef2ff', 100: '#e0e7ff', 200: '#c7d2fe', 300: '#a5b4fc', 400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 800: '#3730a3', 900: '#312e81', 950: '#1e1b4b' },
@@ -107,7 +105,7 @@ export default function App() {
    // App State
    const [activeTab, setActiveTab] = useState<'home' | 'invest' | 'ledger' | 'cash'>('home');
    const [baseCurrency, setBaseCurrency] = useState('TWD');
-   const [rates, setRates] = useState<Record<string, number>>(() => getCachedRates('TWD') || { 'TWD': 1, 'USD': 0.032, 'JPY': 4.6 });
+   const [rates, setRates] = useState<Record<string, number>>(() => getCachedRates('TWD') || FALLBACK_RATES);
    const [showAI, setShowAI] = useState(false);
    const [themeColor, setThemeColor] = useState(localStorage.getItem('theme_color') || 'indigo');
    const [chartsReady, setChartsReady] = useState(false); // Used to defer chart rendering
