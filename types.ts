@@ -94,6 +94,9 @@ export interface Category {
   type: 'expense' | 'income';
   budgetLimit?: number; // Added for Budgeting feature
   order?: number; // Added for Category Reordering
+  // 獨秀指數分子只認「能力收入」的類別 (薪水/獎金)，零用錢之類不算。
+  // undefined = 尚未設定過，改用 constants.ts 的預設關鍵字判斷。
+  isSoloIncome?: boolean;
 }
 
 export interface RecurringRule {

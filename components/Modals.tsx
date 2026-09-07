@@ -6,7 +6,7 @@ import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateD
 import { db, getCollectionPath, auth, getUserProfilePath } from '../services/firebase';
 import { callGemini } from '../services/gemini';
 import { evaluateExpression, isExpression } from '../utils/calc';
-import { ALLOWED_CURRENCIES, PLATFORM_CURRENCIES } from '../constants';
+import { ALLOWED_CURRENCIES, PLATFORM_CURRENCIES, getSoloIncomeCategoryNames } from '../constants';
 import confetti from 'canvas-confetti';
 
 const styles = {
@@ -219,6 +219,17 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
     const [editingBudget, setEditingBudget] = useState('');
 
     const categories = useMemo(() => [...rawCategories].sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [rawCategories]);
+    // 目前算進獨秀指數的收入分類 (使用者沒勾過任何一個時，會是關鍵字推出來的預設值)。
+    const soloIncomeNames = useMemo(() => getSoloIncomeCategoryNames(rawCategories), [rawCategories]);
+
+    // 第一次勾選時，把「目前生效的預設值」一次寫死到每個收入分類上，
+    // 否則勾了新的一項會讓關鍵字預設 (薪水/獎金) 整組失效。
+    const handleToggleSoloIncome = (target: Category) => {
+        rawCategories.filter((c: Category) => c.type === 'income').forEach((c: Category) => {
+            const next = c.id === target.id ? !soloIncomeNames.has(c.name) : soloIncomeNames.has(c.name);
+            if (c.isSoloIncome !== next) onUpdateCategory(c.id, { isSoloIncome: next });
+        });
+    };
 
     const handleMove = (index: number, direction: 'up' | 'down') => {
         const newCats = [...categories];
@@ -398,7 +409,12 @@ export const SettingsModal = ({ onClose, onExport, onExportCSV, onImport, curren
                                             <span className="text-sm font-bold flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${c.type === 'expense' ? 'bg-red-400' : 'bg-emerald-400'}`}></div>{c.name}</span>
                                         </div>
                                         <div className="pl-6 mt-1">
-                                            {editingCatId === c.id ? (
+                                            {c.type === 'income' ? (
+                                                // 收入分類沒有預算可言，改成獨秀指數的「能力收入」開關。
+                                                <button onClick={() => handleToggleSoloIncome(c)} className={`text-xs flex items-center gap-1 ${soloIncomeNames.has(c.name) ? 'text-violet-600 font-bold' : 'text-slate-400'}`} title="獨秀指數 = 能力收入 ÷ 生活成本，只有靠專業與勞務賺來的收入才算能力收入">
+                                                    {soloIncomeNames.has(c.name) ? <CheckSquare size={12} /> : <Square size={12} />} 計入獨秀指數
+                                                </button>
+                                            ) : editingCatId === c.id ? (
                                                 <div className="flex gap-2 items-center">
                                                     <input type="number" className="border rounded px-2 py-1 text-xs w-24" value={editingBudget} onChange={e => setEditingBudget(e.target.value)} placeholder="預算" />
                                                     <button onClick={() => { onUpdateCategory(c.id, { budgetLimit: parseFloat(editingBudget) || 0 }); setEditingCatId(null); }} className="bg-indigo-600 text-white px-2 py-1 rounded text-xs">OK</button>

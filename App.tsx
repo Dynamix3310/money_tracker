@@ -35,7 +35,7 @@ const AddDividendModal = lazy(() => import('./components/Modals').then(m => ({ d
 const PortfolioRebalanceModal = lazy(() => import('./components/Modals').then(m => ({ default: m.PortfolioRebalanceModal })));
 import { AssetHolding, Platform, BankAccount, BankTransaction, CreditCardInfo, CreditCardLog, Transaction, Person, Category, RecurringRule, NetWorthHistory, Group } from './types';
 import { AuthScreen } from './components/Auth';
-import { CURRENCY_SYMBOLS, ALLOWED_CURRENCIES, FALLBACK_RATES } from './constants';
+import { CURRENCY_SYMBOLS, ALLOWED_CURRENCIES, FALLBACK_RATES, getSoloIncomeCategoryNames } from './constants';
 
 const THEME_COLORS: any = {
    'indigo': { 50: '#eef2ff', 100: '#e0e7ff', 200: '#c7d2fe', 300: '#a5b4fc', 400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 800: '#3730a3', 900: '#312e81', 950: '#1e1b4b' },
@@ -456,7 +456,12 @@ export default function App() {
       });
       return Object.entries(grouped).map(([label, value]) => ({ label, value })).slice(-180);
    }, [historyData]);
-   const cashFlowChartData = useMemo(() => getMonthlyCashFlow(transactions, baseCurrency, rates), [transactions, baseCurrency, rates]);
+   // 「我」是哪一個成員：先比登入帳號，再退回 isMe 旗標 (舊資料沒有 uid)。
+   const myPersonId = useMemo(() => people.find((p: any) => (user?.uid && p.uid === user.uid) || p.isMe)?.id ?? null, [people, user?.uid]);
+   // 哪些收入分類算「能力收入」，以使用者在設定裡的勾選為準。
+   const soloIncomeCategories = useMemo(() => getSoloIncomeCategoryNames(categories), [categories]);
+   const cashFlowChartData = useMemo(() => getMonthlyCashFlow(transactions, baseCurrency, rates, myPersonId, soloIncomeCategories), [transactions, baseCurrency, rates, myPersonId, soloIncomeCategories]);
+   const currentSoloIndex = cashFlowChartData[cashFlowChartData.length - 1]?.soloIndex ?? null;
 
    const updateAssetPrices = async (showFeedback = true) => {
       const currentHoldings = holdingsRef.current;
@@ -683,7 +688,18 @@ export default function App() {
                {dataReady && activeTab === 'home' && (
                   <div className="space-y-4 animate-in slide-in-from-bottom-4">
                      <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64"><h3 className="font-bold text-slate-700 text-sm mb-2 flex items-center gap-2"><LineChart size={16} /> 資產趨勢</h3>{chartsReady ? <NetWorthAreaChart data={historyChartData} /> : <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={24} /></div>}</div>
-                     <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-64"><h3 className="font-bold text-slate-700 text-sm mb-4 flex items-center gap-2"><TrendingUp size={16} /> 收支分析</h3>{chartsReady ? <CashFlowBarChart data={cashFlowChartData} /> : <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={24} /></div>}</div>
+                     <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-72">
+                        <div className="flex items-center justify-between mb-1">
+                           <h3 className="font-bold text-slate-700 text-sm flex items-center gap-2"><TrendingUp size={16} /> 收支分析</h3>
+                           {currentSoloIndex !== null && (
+                              <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${currentSoloIndex >= 1 ? 'bg-violet-50 text-violet-600' : 'bg-amber-50 text-amber-600'}`} title="獨秀指數 = 本月我的能力收入 ÷ 我分攤的支出。可在設定 > 分類調整哪些收入算能力收入">
+                                 獨秀指數 {currentSoloIndex.toFixed(2)}
+                              </span>
+                           )}
+                        </div>
+                        <p className="text-[10px] text-slate-400 mb-2">獨秀指數 = 個人能力收入 ÷ 個人分攤支出，1.0 為打平</p>
+                        <div className="h-[calc(100%-3.75rem)]">{chartsReady ? <CashFlowBarChart data={cashFlowChartData} /> : <div className="h-full flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={24} /></div>}</div>
+                     </div>
                   </div>
                )}
                {dataReady && activeTab === 'invest' && <PortfolioView holdings={holdings} platforms={platforms} onAddPlatform={() => setActiveModal('add-platform')} onManagePlatform={() => setActiveModal('manage-platforms')} onManageCash={(p: any) => { setSelectedItem(p); setActiveModal('manage-cash') }} onAddAsset={() => setActiveModal('add-asset')} onUpdatePrices={() => updateAssetPrices(true)} onEdit={(h: any) => { setSelectedItem(h); setActiveModal('edit-asset-price') }} onSell={(h: any) => { setSelectedItem(h); setActiveModal('sell') }} onDividend={() => setActiveModal('add-dividend')} onRebalance={() => setActiveModal('rebalance')} baseCurrency={baseCurrency} rates={rates} convert={convert} CURRENCY_SYMBOLS={CURRENCY_SYMBOLS} />}
@@ -737,9 +753,29 @@ function NavBtn({ icon, label, active, onClick }: any) {
    return (<button onClick={onClick} className={`flex flex-col items-center justify-center w-full h-full ${active ? 'text-emerald-600 scale-105' : 'text-slate-400'}`}><div className={`mb-1 ${active ? '-translate-y-1' : ''}`}>{icon}</div><span className="text-[10px] font-bold">{label}</span></button>)
 }
 
-function getMonthlyCashFlow(transactions: any[], baseCurrency: string, rates: any) {
+// 獨秀指數 (出自 YouTuber 陳一枝) = 自身能力收入(月) / 自身生活成本(月)。
+// >1 經濟自給、=1 打平、<1 需縮支或增收。
+// 兩邊都只取「我」在分攤 (splitDetails) 裡的那一份，而不是帳本總額，
+// 所以共同帳本裡其他成員的收支不會影響這個數字。
+function getMonthlyCashFlow(transactions: any[], baseCurrency: string, rates: any, myPersonId?: string | null, soloIncomeCategories?: Set<string>) {
    const now = new Date(); const months = [];
-   for (let i = 5; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); months.push({ label: `${d.getMonth() + 1}月`, month: d.getMonth(), year: d.getFullYear(), income: 0, expense: 0 }); }
-   transactions.forEach(t => { if (!t.date?.seconds) return; const d = new Date(t.date.seconds * 1000); const m = months.find(mo => mo.month === d.getMonth() && mo.year === d.getFullYear()); if (m) { const val = convert(t.totalAmount, t.currency, baseCurrency, rates); if (t.type === 'income') m.income += val; else m.expense += val; } });
+   for (let i = 5; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); months.push({ label: `${d.getMonth() + 1}月`, month: d.getMonth(), year: d.getFullYear(), income: 0, expense: 0, soloIncome: 0, soloExpense: 0, soloIndex: null as number | null }); }
+   transactions.forEach(t => {
+      if (!t.date?.seconds) return;
+      const d = new Date(t.date.seconds * 1000);
+      const m = months.find(mo => mo.month === d.getMonth() && mo.year === d.getFullYear());
+      if (!m) return;
+      const val = convert(t.totalAmount, t.currency, baseCurrency, rates);
+      if (t.type === 'income') m.income += val; else m.expense += val;
+
+      if (!myPersonId) return;
+      const share = t.splitDetails?.[myPersonId];
+      if (!(share > 0)) return;
+      const myVal = convert(share, t.currency, baseCurrency, rates);
+      if (t.type === 'expense') m.soloExpense += myVal;
+      else if (soloIncomeCategories?.has(t.category)) m.soloIncome += myVal;
+   });
+   // 沒有個人支出的月份留 null，圖上就不畫點 (而不是畫成 0 或 ∞)。
+   months.forEach(m => { m.soloIndex = m.soloExpense > 0 ? Math.round((m.soloIncome / m.soloExpense) * 100) / 100 : null; });
    return months;
 }
