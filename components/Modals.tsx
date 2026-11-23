@@ -2287,7 +2287,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                 : await callGemini(`${prompt}\n\n--- DATA START ---\n${contentToAnalyze}\n--- DATA END ---`);
 
             // Check for API Error messages
-            if (res.includes("權限限制") || res.includes("API Key") || res.includes("系統錯誤") || res.includes("AI 額度") || res.includes("AI 模型") || res.includes("AI 請求失敗")) {
+            if (res.includes("權限限制") || res.includes("API Key") || res.includes("系統錯誤") || res.includes("AI 額度") || res.includes("AI 模型") || res.includes("AI 目前太忙碌") || res.includes("AI 請求失敗")) {
                 alert(res);
                 setLoading(false);
                 return;

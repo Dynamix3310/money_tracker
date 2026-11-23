@@ -220,10 +220,15 @@ export default function App() {
       return () => { unsubProfile(); unsubGroups(); };
    }, [activeUid]);
 
+   // Rates are "fresh" once the network fetch settles (success or failure → keep cached/fallback).
+   const [ratesReady, setRatesReady] = useState(false);
    useEffect(() => {
+      let cancelled = false;
+      setRatesReady(false);
       const cached = getCachedRates(baseCurrency);
       if (cached) setRates(cached);
-      fetchExchangeRates(baseCurrency).then(r => { if (r) setRates(r); });
+      fetchExchangeRates(baseCurrency).then(r => { if (!cancelled && r) setRates(r); }).catch(() => { }).finally(() => { if (!cancelled) setRatesReady(true); });
+      return () => { cancelled = true; };
    }, [baseCurrency]);
 
    useEffect(() => {
@@ -353,15 +358,19 @@ export default function App() {
       }
    };
 
+   // True once every private collection has delivered a snapshot from the server (not localStorage / local cache).
+   const [privateLoaded, setPrivateLoaded] = useState(false);
    useEffect(() => {
       if (!activeUid || !db) return;
+      setPrivateLoaded(false);
       const privateCols = ['platforms', 'holdings', 'accounts', 'bankLogs', 'creditCards', 'cardLogs', 'history'];
+      const loadedCols = new Set<string>();
       const privateUnsubs = privateCols.map(c => {
          let q = collection(db, getCollectionPath(activeUid, null, c)) as any;
          if (c === 'history') q = query(q, orderBy('date', 'desc'), limit(180));
          if (c === 'bankLogs' || c === 'cardLogs') q = query(q, orderBy('date', 'desc'));
-         return onSnapshot(q, s => {
-            const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+         return onSnapshot(q, (s: any) => {
+            const data = s.docs.map((d: any) => ({ id: d.id, ...d.data() }));
             if (c === 'platforms') { setPlatforms(data as Platform[]); try { localStorage.setItem('cached_platforms', JSON.stringify(data)); } catch { } }
             if (c === 'holdings') { setHoldings(data as AssetHolding[]); try { localStorage.setItem('cached_holdings', JSON.stringify(data)); } catch { } }
             if (c === 'accounts') { setAccounts(data as BankAccount[]); try { localStorage.setItem('cached_accounts', JSON.stringify(data)); } catch { } }
@@ -369,6 +378,10 @@ export default function App() {
             if (c === 'creditCards') { setCreditCards(data as CreditCardInfo[]); try { localStorage.setItem('cached_creditCards', JSON.stringify(data)); } catch { } }
             if (c === 'cardLogs') { setCardLogs(data as CreditCardLog[]); try { localStorage.setItem('cached_cardLogs', JSON.stringify(data.slice(0, 100))); } catch { } }
             if (c === 'history') { setHistoryData((data as NetWorthHistory[]).reverse()); try { localStorage.setItem('cached_history', JSON.stringify(data.slice(-180))); } catch { } }
+            if (!s.metadata.fromCache && !loadedCols.has(c)) {
+               loadedCols.add(c);
+               if (loadedCols.size === privateCols.length) setPrivateLoaded(true);
+            }
          });
       });
       return () => { privateUnsubs.forEach(u => u()); };
@@ -424,31 +437,26 @@ export default function App() {
       return investVal + platformCashVal + cashVal;
    }, [holdings, platforms, calculatedAccounts, baseCurrency, rates]);
 
-   const historyAddedRef = useRef<string | null>(null);
+   // Net worth is trustworthy only after server data and live exchange rates have arrived;
+   // before that it is computed from the localStorage cache and may be stale.
+   const netWorthReady = privateLoaded && ratesReady;
 
+   // Keep today's history entry in sync with the fresh net worth. The doc id is the date, so later
+   // updates the same day (e.g. after the background price refresh) overwrite instead of duplicating.
    useEffect(() => {
-      if (!activeUid || totalNetWorth === 0) return;
+      if (!activeUid || !netWorthReady || totalNetWorth === 0) return;
       const today = new Date().toISOString().split('T')[0];
-      const lastEntry = historyData.length > 0 ? historyData[historyData.length - 1] : null;
-      let lastDate = '';
-      if (lastEntry) {
-         if (lastEntry.date && typeof lastEntry.date.seconds === 'number') {
-            lastDate = new Date(lastEntry.date.seconds * 1000).toISOString().split('T')[0];
-         } else if (lastEntry.date) {
-            lastDate = today; // Pending timestamp or other format
-         }
-      }
-      
-      if (lastDate !== today && historyAddedRef.current !== today) {
-         historyAddedRef.current = today;
-         // Date-keyed doc id: a second device on the same day overwrites instead of adding a duplicate.
+      const todayEntry = historyData.find(h => h.id === today || (typeof h.date?.seconds === 'number' && new Date(h.date.seconds * 1000).toISOString().split('T')[0] === today));
+      if (todayEntry && todayEntry.currency === baseCurrency && Math.abs(todayEntry.amount - totalNetWorth) < 1) return;
+      const t = setTimeout(() => {
          setDoc(doc(db, getCollectionPath(activeUid, null, 'history'), today), {
             date: Timestamp.fromDate(new Date()),
             amount: totalNetWorth,
             currency: baseCurrency
          });
-      }
-   }, [activeUid, totalNetWorth, historyData, baseCurrency]);
+      }, 3000);
+      return () => clearTimeout(t);
+   }, [activeUid, netWorthReady, totalNetWorth, historyData, baseCurrency]);
 
    const historyChartData = useMemo(() => {
       const grouped: Record<string, number> = {};
@@ -658,8 +666,9 @@ export default function App() {
                      {showNetWorth ? <Eye size={14} /> : <EyeOff size={14} />}
                   </button>
                </div>
-               <div className="text-xl font-bold text-white tracking-tight">
+               <div className={`text-xl font-bold text-white tracking-tight flex items-center gap-2 transition-opacity ${netWorthReady ? '' : 'opacity-50'}`} title={netWorthReady ? undefined : '同步最新資料中…'}>
                   {showNetWorth ? `${CURRENCY_SYMBOLS[baseCurrency]} ${Math.round(totalNetWorth).toLocaleString()}` : `****`}
+                  {!netWorthReady && <Loader2 size={14} className="animate-spin" />}
                </div>
             </div>
          </header>

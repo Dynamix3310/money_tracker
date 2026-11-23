@@ -5,7 +5,8 @@ import { ADMIN_EMAILS, fetchPriceWithAI } from "./gemini";
 export async function fetchExchangeRates(base: string = 'TWD') {
   try {
     // using a free open API for rates
-    const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${base}`);
+    // Time out so a hanging request can't block "net worth ready" forever.
+    const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${base}`, { signal: AbortSignal.timeout(8000) });
     const data = await response.json();
     // Cache rates for instant next startup
     if (data.rates) {

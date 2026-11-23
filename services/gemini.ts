@@ -26,6 +26,32 @@ export const ADMIN_EMAILS = [
 
 // Gemini 2.5 Flash is only served to projects that already used it; new keys get errors.
 export const GEMINI_MODEL = 'gemini-3.8-flash';
+// Used when the main model stays overloaded (503) after retries.
+export const GEMINI_FALLBACK_MODEL = 'gemini-3.6-flash';
+
+const isOverloaded = (e: any) => /\b503\b|UNAVAILABLE|overloaded|high demand/i.test(e?.message || '');
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+// Retry temporary overload errors with backoff, then try the fallback model once.
+async function generateWithRetry(ai: any, request: any) {
+  const plan = [
+    { model: GEMINI_MODEL, wait: 0 },
+    { model: GEMINI_MODEL, wait: 1500 },
+    { model: GEMINI_MODEL, wait: 4000 },
+    { model: GEMINI_FALLBACK_MODEL, wait: 1000 },
+  ];
+  let lastError: any;
+  for (const step of plan) {
+    if (step.wait) await sleep(step.wait);
+    try {
+      return await ai.models.generateContent({ ...request, model: step.model });
+    } catch (e) {
+      lastError = e;
+      if (!isOverloaded(e)) throw e;
+    }
+  }
+  throw lastError;
+}
 
 export async function callGemini(prompt: string, imageBase64?: string) {
   // 1. Determine which Key to use
@@ -67,16 +93,13 @@ export async function callGemini(prompt: string, imageBase64?: string) {
   try {
     const GoogleGenAI = await loadGenAI();
     const ai = new GoogleGenAI({ apiKey });
-    const modelId = GEMINI_MODEL;
-
     let response;
 
     if (imageBase64) {
       // Handle image input
       const base64Data = imageBase64.split(',')[1] || imageBase64;
       const mimeType = imageBase64.match(/^data:([^;]+);base64,/)?.[1] || 'image/jpeg';
-      response = await ai.models.generateContent({
-        model: modelId,
+      response = await generateWithRetry(ai, {
         contents: {
           parts: [
             { inlineData: { mimeType, data: base64Data } },
@@ -86,10 +109,7 @@ export async function callGemini(prompt: string, imageBase64?: string) {
       });
     } else {
       // Text only
-      response = await ai.models.generateContent({
-        model: modelId,
-        contents: prompt,
-      });
+      response = await generateWithRetry(ai, { contents: prompt });
     }
 
     return response.text;
@@ -98,6 +118,7 @@ export async function callGemini(prompt: string, imageBase64?: string) {
     const msg: string = error?.message || '';
     if (/API key not valid|API_KEY_INVALID/i.test(msg)) return "API Key 無效，請檢查設定。";
     if (/429|RESOURCE_EXHAUSTED|quota/i.test(msg)) return "AI 額度已滿，請稍後再試。";
+    if (isOverloaded(error)) return "AI 目前太忙碌（已自動重試仍失敗），請過幾分鐘再試。";
     if (/404|NOT_FOUND|not found|no longer available/i.test(msg)) return `AI 模型 ${GEMINI_MODEL} 無法使用 (${msg.slice(0, 200)})`;
     // Return the actual error message for debugging
     return `AI 請求失敗 (${error.message || 'Unknown Error'})。請稍後再試。`;
