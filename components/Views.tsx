@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal, FileSpreadsheet, Coins, Scale, X, ArrowUpDown, Camera } from 'lucide-react';
+import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal, FileSpreadsheet, Coins, Scale, X, ArrowUpDown, Camera, Mail } from 'lucide-react';
 import { AssetHolding, Transaction, BankAccount, CreditCardInfo, Person, BankTransaction, CreditCardLog, Platform } from '../types';
 import { ExpensePieChart } from './Charts';
 
@@ -325,23 +325,22 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
     return (
         <div className="space-y-4 animate-in slide-in-from-bottom-4 pb-20">
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 sticky top-0 z-10">
-                <div className="flex justify-between items-center mb-3">
-                    <div className="flex items-center gap-2"><div className="bg-indigo-100 text-indigo-600 p-1.5 rounded-lg"><Users size={16} /></div><div><h3 className="font-bold text-sm">{currentGroupId === userId ? '個人帳本' : '群組帳本'}</h3></div></div>
-                    <div className="flex gap-2">
+                <div className="flex justify-between items-center gap-2 mb-3">
+                    <div className="flex items-center gap-2 min-w-0"><div className="bg-indigo-100 text-indigo-600 p-1.5 rounded-lg shrink-0"><Users size={16} /></div><h3 className="font-bold text-sm whitespace-nowrap">{currentGroupId === userId ? '個人帳本' : '群組帳本'}</h3></div>
+                    <div className="flex gap-1.5 shrink-0">
                         <button onClick={onManageRecurring} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors" title="固定收支"><Repeat size={16} /></button>
-                        <button onClick={onEmailSync} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors flex items-center gap-1" title="Gmail 電子帳單"><Receipt size={16} /></button>
-                        <button onClick={onBatchAdd} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors flex items-center gap-1" title="匯入發票/CSV"><FileSpreadsheet size={16} /></button>
-                        <div className="flex bg-slate-100 p-1 rounded-lg">
-                            <button onClick={() => setViewMode('list')} className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}><Calendar size={14} /></button>
-                            <button onClick={() => setViewMode('debts')} className={`p-1.5 rounded ${viewMode === 'debts' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}><Receipt size={14} /></button>
-                            <button onClick={() => setViewMode('budget')} className={`p-1.5 rounded ${viewMode === 'budget' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}><Goal size={14} /></button>
-                            <button onClick={() => setViewMode('stats')} className={`p-1.5 rounded ${viewMode === 'stats' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}><PieChart size={14} /></button>
-                        </div>
-                        <button onClick={onAdd} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><Plus size={14} /> 記一筆</button>
+                        <button onClick={onEmailSync} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors" title="Gmail 電子帳單"><Mail size={16} /></button>
+                        <button onClick={onBatchAdd} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors" title="匯入發票/CSV"><FileSpreadsheet size={16} /></button>
+                        <button onClick={onAdd} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap"><Plus size={14} /> 記一筆</button>
                     </div>
                 </div>
+                <div className="flex bg-slate-100 p-1 rounded-lg">
+                    {([['list', Calendar, '明細'], ['debts', Receipt, '結算'], ['budget', Goal, '預算'], ['stats', PieChart, '統計']] as const).map(([mode, Icon, label]) => (
+                        <button key={mode} onClick={() => setViewMode(mode)} className={`flex-1 py-1.5 rounded text-xs font-bold flex items-center justify-center gap-1 whitespace-nowrap ${viewMode === mode ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}><Icon size={14} /> {label}</button>
+                    ))}
+                </div>
                 {(viewMode === 'list' || viewMode === 'stats') && (
-                    <div className="flex flex-col gap-2 pt-1">
+                    <div className="flex flex-col gap-2 pt-3">
                         <div className="relative"><Search size={16} className="absolute left-3 top-2.5 text-slate-400" /><input placeholder="搜尋說明或分類..." className="w-full bg-slate-50 border rounded-xl pl-10 pr-4 py-2 text-sm outline-none" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />{searchTerm && <button onClick={() => setSearchTerm('')} className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"><X size={16} /></button>}</div>
                         <div className="flex flex-wrap gap-2">
                             {['all', 'week', 'month', 'lastMonth', 'year', 'custom'].map((r: any) => (

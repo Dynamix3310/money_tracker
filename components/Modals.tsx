@@ -2100,14 +2100,22 @@ export const EmailStatementSyncModal = ({ accounts, creditCards, onImport, onClo
             const bytes = await downloadAttachment(token, st.messageId, st.attachmentId);
             const text = await extractPdfText(bytes, password);
             if (text.replace(/\s/g, '').length < 50) throw new Error('PDF 裡讀不到文字（可能是掃描圖檔），請改用「圖片掃描」手動匯入');
-            onImport({ target: src.target, targetId: src.targetId, text, hint: STATEMENT_HINTS[src.target], onSaved: () => markProcessed(st.messageId) });
+            const cardMap = src.target === 'card' ? Object.fromEntries((src.cards || []).filter(c => /^\d{4}$/.test(c.last4) && c.cardId).map(c => [c.last4, c.cardId])) : {};
+            onImport({ target: src.target, targetId: src.targetId, text, hint: STATEMENT_HINTS[src.target], cardMap: Object.keys(cardMap).length ? cardMap : undefined, onSaved: () => markProcessed(st.messageId) });
         } catch (e: any) {
             setError(e instanceof PdfPasswordError ? 'PDF 密碼錯誤，請確認設定中的密碼（身分證字號英文要大寫）' : (e?.message || '匯入失敗'));
         } finally { setBusy(null); }
     };
 
     const skipOne = (st: FoundStatement) => { markProcessed(st.messageId); setFound(f => f && f.filter(x => x.messageId !== st.messageId)); };
-    const targetName = (src?: StatementSource) => !src ? '' : src.target === 'card' ? creditCards.find((c: any) => c.id === src.targetId)?.name : accounts.find((a: any) => a.id === src.targetId)?.name;
+    const cardName = (id: string) => creditCards.find((c: any) => c.id === id)?.name;
+    const targetName = (src?: StatementSource) => {
+        if (!src) return '';
+        if (src.target === 'bank') return accounts.find((a: any) => a.id === src.targetId)?.name;
+        const extra = (src.cards || []).filter(c => c.cardId).map(c => `${cardName(c.cardId)} (${c.last4})`);
+        return [cardName(src.targetId), ...extra].filter(Boolean).join('、');
+    };
+    const setCards = (src: StatementSource, cards: { last4: string; cardId: string }[]) => updateSource(src.id, { cards });
 
     return (
         <div className={styles.overlay} {...chrome}><div className={`${styles.content} max-w-lg`}>
@@ -2142,6 +2150,22 @@ export const EmailStatementSyncModal = ({ accounts, creditCards, onImport, onClo
                                     {(src.target === 'card' ? creditCards : accounts).map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}
                                 </select>
                             </div>
+                            {src.target === 'card' && (
+                                <div className="space-y-1.5">
+                                    {(src.cards || []).length > 0 && <div className="text-[10px] text-slate-400">同一份帳單有多張卡：依卡號後四碼分配，對不到的放到上面那張卡</div>}
+                                    {(src.cards || []).map((c, i) => (
+                                        <div key={i} className="flex gap-2 items-center">
+                                            <input inputMode="numeric" maxLength={4} placeholder="後四碼" className="w-20 px-2 py-1.5 rounded ring-1 ring-slate-200 text-sm font-mono" value={c.last4} onChange={e => setCards(src, (src.cards || []).map((x, j) => j === i ? { ...x, last4: e.target.value.replace(/\D/g, '') } : x))} />
+                                            <select className="flex-1 px-2 py-1.5 rounded ring-1 ring-slate-200 text-sm" value={c.cardId} onChange={e => setCards(src, (src.cards || []).map((x, j) => j === i ? { ...x, cardId: e.target.value } : x))}>
+                                                <option value="">選擇卡片</option>
+                                                {creditCards.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                                            </select>
+                                            <button onClick={() => setCards(src, (src.cards || []).filter((_, j) => j !== i))} className="text-slate-300 hover:text-red-500"><X size={14} /></button>
+                                        </div>
+                                    ))}
+                                    <button onClick={() => setCards(src, [...(src.cards || []), { last4: '', cardId: '' }])} className="text-xs text-indigo-600 font-bold">＋ 依卡號分配到其他卡</button>
+                                </div>
+                            )}
                         </div>
                     ))}
                     <div className="flex gap-3 text-xs font-bold"><button onClick={addSource} className="text-indigo-600">＋ 新增來源</button><button onClick={resetSources} className="text-slate-400">恢復預設</button></div>
@@ -2211,7 +2235,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
             });
         } else if (target === 'card') {
             return existingCardLogs.some((l: any) => {
-                if (l.cardId !== targetId) return false;
+                if (l.cardId !== (item.cardId || targetId)) return false;
                 return isSameDate(l.date, itemDateStr) && Math.abs(l.amount - item.amount) < 1;
             });
         }
@@ -2255,6 +2279,8 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
             }
 
             if (initialConfig?.hint) prompt += `\n${initialConfig.hint}`;
+            const cardMap: Record<string, string> | undefined = target === 'card' ? initialConfig?.cardMap : undefined;
+            if (cardMap) prompt += `\nThe statement covers several cards. For EVERY row also output cardLast4: the last 4 digits (string) of the card number of the section or row it belongs to (known cards: ${Object.keys(cardMap).join(', ')}).`;
             const res = await callGemini(prompt, contentToAnalyze);
 
             // Check for API Error messages
@@ -2302,6 +2328,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                 it.amount = amt || 0;
 
                 if (!it.date) it.date = new Date().toISOString().split('T')[0];
+                if (cardMap) it.cardId = cardMap[String(it.cardLast4 || '').slice(-4)] || targetId;
 
                 const isDup = checkDuplicate(it);
 
@@ -2363,7 +2390,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                 const col = collection(db, getCollectionPath(userId, null, 'cardLogs'));
                 for (const item of selected) {
                     batch.push(addDoc(col, {
-                        cardId: targetId,
+                        cardId: item.cardId || targetId,
                         amount: item.amount,
                         description: item.description,
                         date: Timestamp.fromDate(new Date(item.date)),
@@ -2510,6 +2537,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                                             <input type="date" value={item.date} onChange={e => { const n = [...parsedItems]; n[idx].date = e.target.value; setParsedItems(n) }} className="text-xs text-slate-400 bg-transparent" />
                                             {target === 'ledger' && (<select value={item.category} onChange={e => { const n = [...parsedItems]; n[idx].category = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1 max-w-[80px]">{categories.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}</select>)}
                                             {(target === 'bank' || target === 'ledger') && (<select value={item.type} onChange={e => { const n = [...parsedItems]; n[idx].type = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{target === 'ledger' ? <><option value="expense">支出</option><option value="income">收入</option></> : <><option value="out">支出</option><option value="in">收入</option></>}</select>)}
+                                            {target === 'card' && initialConfig?.cardMap && (<select value={item.cardId || targetId} onChange={e => { const n = [...parsedItems]; n[idx].cardId = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1 max-w-[120px]">{creditCards.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>)}
                                             {target === 'ledger' && (<select value={item.currency || 'TWD'} onChange={e => { const n = [...parsedItems]; n[idx].currency = e.target.value; setParsedItems(n) }} className="text-xs bg-slate-100 rounded px-1">{ALLOWED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select>)}
                                         </div>
                                     </div>

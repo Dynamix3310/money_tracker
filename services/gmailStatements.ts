@@ -9,7 +9,8 @@ export interface StatementSource {
     label: string;
     query: string;            // Gmail search query, e.g. from:ebill@estats.ctbcbank.com subject:信用卡
     target: StatementTarget;
-    targetId: string;         // bank account id or credit card id
+    targetId: string;         // bank account id or credit card id (default card when cards[] is used)
+    cards?: { last4: string; cardId: string }[]; // one statement covering several cards, matched by last 4 digits
 }
 
 export interface FoundStatement {
