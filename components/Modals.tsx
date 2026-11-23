@@ -2281,10 +2281,13 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
             if (initialConfig?.hint) prompt += `\n${initialConfig.hint}`;
             const cardMap: Record<string, string> | undefined = target === 'card' ? initialConfig?.cardMap : undefined;
             if (cardMap) prompt += `\nThe statement covers several cards. For EVERY row also output cardLast4: the last 4 digits (string) of the card number of the section or row it belongs to (known cards: ${Object.keys(cardMap).join(', ')}).`;
-            const res = await callGemini(prompt, contentToAnalyze);
+            // Text/CSV goes inside the prompt; only real images are sent as image data.
+            const res = mode === 'image'
+                ? await callGemini(prompt, contentToAnalyze)
+                : await callGemini(`${prompt}\n\n--- DATA START ---\n${contentToAnalyze}\n--- DATA END ---`);
 
             // Check for API Error messages
-            if (res.includes("權限限制") || res.includes("API Key") || res.includes("系統錯誤") || res.includes("AI 暫時無法回應")) {
+            if (res.includes("權限限制") || res.includes("API Key") || res.includes("系統錯誤") || res.includes("AI 額度") || res.includes("AI 模型") || res.includes("AI 請求失敗")) {
                 alert(res);
                 setLoading(false);
                 return;

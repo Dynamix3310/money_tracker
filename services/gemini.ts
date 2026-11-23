@@ -24,6 +24,9 @@ export const ADMIN_EMAILS = [
   'jennyliao26217167@gmail.com'
 ];
 
+// Gemini 2.5 Flash is only served to projects that already used it; new keys get errors.
+export const GEMINI_MODEL = 'gemini-3.8-flash';
+
 export async function callGemini(prompt: string, imageBase64?: string) {
   // 1. Determine which Key to use
   let apiKey: string | undefined;
@@ -64,7 +67,7 @@ export async function callGemini(prompt: string, imageBase64?: string) {
   try {
     const GoogleGenAI = await loadGenAI();
     const ai = new GoogleGenAI({ apiKey });
-    const modelId = 'gemini-2.5-flash';
+    const modelId = GEMINI_MODEL;
 
     let response;
 
@@ -92,9 +95,10 @@ export async function callGemini(prompt: string, imageBase64?: string) {
     return response.text;
   } catch (error: any) {
     console.error("Gemini Error:", error);
-    if (error.message?.includes('400') || error.message?.includes('API key')) {
-      return "API Key 無效或是額度已滿，請檢查設定。";
-    }
+    const msg: string = error?.message || '';
+    if (/API key not valid|API_KEY_INVALID/i.test(msg)) return "API Key 無效，請檢查設定。";
+    if (/429|RESOURCE_EXHAUSTED|quota/i.test(msg)) return "AI 額度已滿，請稍後再試。";
+    if (/404|NOT_FOUND|not found|no longer available/i.test(msg)) return `AI 模型 ${GEMINI_MODEL} 無法使用 (${msg.slice(0, 200)})`;
     // Return the actual error message for debugging
     return `AI 請求失敗 (${error.message || 'Unknown Error'})。請稍後再試。`;
   }
@@ -129,7 +133,7 @@ export async function fetchPriceWithAI(symbol: string): Promise<number | null> {
     const ai = new GoogleGenAI({ apiKey });
     // Using googleSearch tool
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: GEMINI_MODEL,
       contents: `Search for the current stock price of "${symbol}". If the symbol contains numbers like 1475 or 7203, it is likely a Japanese stock code. Return ONLY the numeric value of the price (e.g. 1234.5). Do not return currency symbols or other text.`,
       config: {
         tools: [{ googleSearch: {} }]
