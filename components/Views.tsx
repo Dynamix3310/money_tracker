@@ -28,16 +28,20 @@ export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlat
     };
     return (
         <div className="space-y-6 animate-in slide-in-from-bottom-4 pb-20">
-            <div className="flex justify-between items-center">
-                <div className="flex items-center gap-2"> <h3 className="font-bold text-lg text-slate-800">投資組合</h3> <button onClick={onManagePlatform} className="text-slate-300 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><Settings size={16} /></button> </div>
-                <div className="flex gap-2">
-                    <button onClick={toggleSortMode} className="bg-white border border-slate-200 text-slate-600 px-2 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-slate-50 active:scale-95 transition-all" title={sortMode === 'alpha' ? '目前依字母排序，點擊改依總成本' : '目前依總成本排序，點擊改依字母'}><ArrowUpDown size={14} /> {sortMode === 'alpha' ? 'A-Z' : '成本'}</button>
-                    <button onClick={onScreenshotSync} className="bg-white border border-indigo-200 text-indigo-600 p-2 rounded-lg shadow-sm hover:bg-indigo-50 active:scale-95 transition-all" title="截圖同步倉位"><Camera size={16} /></button>
-                    <button onClick={onRebalance} className="bg-white border border-indigo-200 text-indigo-600 p-2 rounded-lg shadow-sm hover:bg-indigo-50 active:scale-95 transition-all" title="再平衡分析"><Scale size={16} /></button>
-                    <button onClick={onUpdatePrices} className="bg-white border border-slate-200 text-slate-600 p-2 rounded-lg shadow-sm hover:bg-slate-50 active:scale-95 transition-all" title="更新股價"><RefreshCw size={16} /></button>
-                    <button onClick={onDividend} className="bg-emerald-50 border border-emerald-100 text-emerald-600 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-emerald-100" title="領取股利"><Coins size={14} /> 股利</button>
-                    <button onClick={onAddPlatform} className="bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-slate-200"><Building2 size={14} /> 平台</button>
-                    <button onClick={onAddAsset} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-indigo-700 transition-colors"><Plus size={14} /> 資產</button>
+            <div className="space-y-3">
+                <div className="flex justify-between items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0"> <h3 className="font-bold text-lg text-slate-800 whitespace-nowrap">投資組合</h3> <button onClick={onManagePlatform} className="text-slate-300 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><Settings size={16} /></button> </div>
+                    <div className="flex gap-2">
+                        <button onClick={onAddPlatform} className="whitespace-nowrap shrink-0 bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-slate-200"><Building2 size={14} /> 平台</button>
+                        <button onClick={onAddAsset} className="whitespace-nowrap shrink-0 bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-indigo-700 transition-colors"><Plus size={14} /> 資產</button>
+                    </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    <button onClick={toggleSortMode} className="whitespace-nowrap shrink-0 bg-white border border-slate-200 text-slate-600 px-2 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-slate-50 active:scale-95 transition-all" title={sortMode === 'alpha' ? '目前依字母排序，點擊改依總成本' : '目前依總成本排序，點擊改依字母'}><ArrowUpDown size={14} /> {sortMode === 'alpha' ? 'A-Z' : '成本'}</button>
+                    <button onClick={onScreenshotSync} className="whitespace-nowrap shrink-0 bg-white border border-indigo-200 text-indigo-600 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-indigo-50 active:scale-95 transition-all" title="截圖同步倉位"><Camera size={14} /> 截圖</button>
+                    <button onClick={onRebalance} className="whitespace-nowrap shrink-0 bg-white border border-indigo-200 text-indigo-600 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-indigo-50 active:scale-95 transition-all" title="再平衡分析"><Scale size={14} /> 再平衡</button>
+                    <button onClick={onUpdatePrices} className="whitespace-nowrap shrink-0 bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-slate-50 active:scale-95 transition-all" title="更新股價"><RefreshCw size={14} /> 股價</button>
+                    <button onClick={onDividend} className="whitespace-nowrap shrink-0 bg-emerald-50 border border-emerald-100 text-emerald-600 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-emerald-100" title="領取股利"><Coins size={14} /> 股利</button>
                 </div>
             </div>
             {platforms.length === 0 && holdings.length === 0 && (<div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-2xl"><div className="text-slate-400 font-medium">尚無投資平台或資產</div></div>)}
