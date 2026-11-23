@@ -71,11 +71,12 @@ export async function callGemini(prompt: string, imageBase64?: string) {
     if (imageBase64) {
       // Handle image input
       const base64Data = imageBase64.split(',')[1] || imageBase64;
+      const mimeType = imageBase64.match(/^data:([^;]+);base64,/)?.[1] || 'image/jpeg';
       response = await ai.models.generateContent({
         model: modelId,
         contents: {
           parts: [
-            { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
+            { inlineData: { mimeType, data: base64Data } },
             { text: prompt }
           ]
         }

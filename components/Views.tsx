@@ -1,23 +1,38 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal, FileSpreadsheet, Coins, Scale, X } from 'lucide-react';
+import { TrendingUp, Plus, Wallet, Calendar, PieChart, Edit, RefreshCw, Building2, DollarSign, Link2, Sparkles, Users, Search, Settings, ArrowUpRight, ArrowDownRight, Trash2, ArrowRightLeft, Receipt, Repeat, CreditCard, Goal, FileSpreadsheet, Coins, Scale, X, ArrowUpDown, Camera } from 'lucide-react';
 import { AssetHolding, Transaction, BankAccount, CreditCardInfo, Person, BankTransaction, CreditCardLog, Platform } from '../types';
 import { ExpensePieChart } from './Charts';
 
 // --- Portfolio View ---
-export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlatform, onManageCash, onAddAsset, onSell, onEdit, onUpdatePrices, onDividend, onRebalance, baseCurrency, rates, convert, CURRENCY_SYMBOLS }: any) => {
+export const PortfolioView = ({ holdings, platforms, onAddPlatform, onManagePlatform, onManageCash, onAddAsset, onSell, onEdit, onUpdatePrices, onDividend, onRebalance, onScreenshotSync, baseCurrency, rates, convert, CURRENCY_SYMBOLS }: any) => {
+    const [sortMode, setSortMode] = useState<'alpha' | 'cost'>(() => {
+        try { return localStorage.getItem('portfolioSortMode') === 'cost' ? 'cost' : 'alpha'; } catch { return 'alpha'; }
+    });
     const groupedData = useMemo(() => {
         const map: Record<string, AssetHolding[]> = {};
         platforms.forEach((p: Platform) => map[p.id] = []);
         map['other'] = [];
         holdings.forEach((h: AssetHolding) => { if (h.platformId && map[h.platformId]) map[h.platformId].push(h); else map['other'].push(h); });
+        const totalCost = (h: AssetHolding) => convert(h.quantity * h.avgCost, h.currency, baseCurrency, rates);
+        const cmp = sortMode === 'cost'
+            ? (a: AssetHolding, b: AssetHolding) => totalCost(b) - totalCost(a)
+            : (a: AssetHolding, b: AssetHolding) => (a.symbol || '').localeCompare(b.symbol || '', undefined, { numeric: true, sensitivity: 'base' });
+        Object.values(map).forEach(list => list.sort(cmp));
         return map;
-    }, [holdings, platforms]);
+    }, [holdings, platforms, sortMode, convert, baseCurrency, rates]);
+    const toggleSortMode = () => {
+        const next = sortMode === 'alpha' ? 'cost' : 'alpha';
+        setSortMode(next);
+        try { localStorage.setItem('portfolioSortMode', next); } catch { /* ignore */ }
+    };
     return (
         <div className="space-y-6 animate-in slide-in-from-bottom-4 pb-20">
             <div className="flex justify-between items-center">
                 <div className="flex items-center gap-2"> <h3 className="font-bold text-lg text-slate-800">投資組合</h3> <button onClick={onManagePlatform} className="text-slate-300 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><Settings size={16} /></button> </div>
                 <div className="flex gap-2">
+                    <button onClick={toggleSortMode} className="bg-white border border-slate-200 text-slate-600 px-2 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-slate-50 active:scale-95 transition-all" title={sortMode === 'alpha' ? '目前依字母排序，點擊改依總成本' : '目前依總成本排序，點擊改依字母'}><ArrowUpDown size={14} /> {sortMode === 'alpha' ? 'A-Z' : '成本'}</button>
+                    <button onClick={onScreenshotSync} className="bg-white border border-indigo-200 text-indigo-600 p-2 rounded-lg shadow-sm hover:bg-indigo-50 active:scale-95 transition-all" title="截圖同步倉位"><Camera size={16} /></button>
                     <button onClick={onRebalance} className="bg-white border border-indigo-200 text-indigo-600 p-2 rounded-lg shadow-sm hover:bg-indigo-50 active:scale-95 transition-all" title="再平衡分析"><Scale size={16} /></button>
                     <button onClick={onUpdatePrices} className="bg-white border border-slate-200 text-slate-600 p-2 rounded-lg shadow-sm hover:bg-slate-50 active:scale-95 transition-all" title="更新股價"><RefreshCw size={16} /></button>
                     <button onClick={onDividend} className="bg-emerald-50 border border-emerald-100 text-emerald-600 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm hover:bg-emerald-100" title="領取股利"><Coins size={14} /> 股利</button>
@@ -136,7 +151,7 @@ const getCategoryBgColor = (category: string, type: string) => {
 };
 
 // --- Ledger View ---
-export const LedgerView = ({ transactions, categories: rawCategories, people, onAdd, onBatchAdd, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring, onLoadMore }: any) => {
+export const LedgerView = ({ transactions, categories: rawCategories, people, onAdd, onBatchAdd, onEmailSync, currentGroupId, userId, onDelete, onEdit, cardLogs, onManageRecurring, onLoadMore }: any) => {
     const categories = useMemo(() => [...rawCategories].sort((a: any, b: any) => (a.order || 0) - (b.order || 0)), [rawCategories]);
     const [viewMode, setViewMode] = useState<'list' | 'stats' | 'debts' | 'budget'>('list');
     const [searchTerm, setSearchTerm] = useState('');
@@ -310,6 +325,7 @@ export const LedgerView = ({ transactions, categories: rawCategories, people, on
                     <div className="flex items-center gap-2"><div className="bg-indigo-100 text-indigo-600 p-1.5 rounded-lg"><Users size={16} /></div><div><h3 className="font-bold text-sm">{currentGroupId === userId ? '個人帳本' : '群組帳本'}</h3></div></div>
                     <div className="flex gap-2">
                         <button onClick={onManageRecurring} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors" title="固定收支"><Repeat size={16} /></button>
+                        <button onClick={onEmailSync} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors flex items-center gap-1" title="Gmail 電子帳單"><Receipt size={16} /></button>
                         <button onClick={onBatchAdd} className="text-indigo-600 p-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors flex items-center gap-1" title="匯入發票/CSV"><FileSpreadsheet size={16} /></button>
                         <div className="flex bg-slate-100 p-1 rounded-lg">
                             <button onClick={() => setViewMode('list')} className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-white shadow text-slate-800' : 'text-slate-400'}`}><Calendar size={14} /></button>

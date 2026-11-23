@@ -23,3 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 firestore.rules
+
+# Sample bank statements (personal data)
+/*.pdf
+.env

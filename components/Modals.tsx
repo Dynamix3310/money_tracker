@@ -5,6 +5,7 @@ import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog,
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc, getDocs, query, orderBy, where, increment, getDoc, writeBatch } from 'firebase/firestore';
 import { db, getCollectionPath, auth, getUserProfilePath } from '../services/firebase';
 import { callGemini } from '../services/gemini';
+import { StatementSource, FoundStatement, DEFAULT_SOURCES, loadSources, saveSources, loadPassword, savePassword, markProcessed, getGoogleClientId, getGmailToken, searchStatements, downloadAttachment, extractPdfText, PdfPasswordError, getLastFound, setLastFound } from '../services/gmailStatements';
 import { evaluateExpression, isExpression } from '../utils/calc';
 import { ALLOWED_CURRENCIES, PLATFORM_CURRENCIES, getSoloIncomeCategoryNames } from '../constants';
 import confetti from 'canvas-confetti';
@@ -1108,6 +1109,195 @@ export const AddAssetModal = ({ userId, platforms, onClose }: any) => {
     );
 };
 
+// --- Screenshot Sync Modal (AI reads broker screenshot, user confirms diff) ---
+const normSymbol = (s: string) => (s || '').toUpperCase().replace(/\s+/g, '').split('.')[0];
+const toNum = (v: any): number | null => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g, ''));
+    return isFinite(n) ? n : null;
+};
+
+type SyncRow = {
+    key: string;
+    kind: 'update' | 'new' | 'missing';
+    holding?: AssetHolding;
+    symbol: string;
+    name?: string;
+    quantity: string;
+    avgCost: string;
+    currentPrice: number | null;
+    include: boolean;
+};
+
+export const ScreenshotSyncModal = ({ userId, platforms, holdings, onClose }: any) => {
+    const chrome = useModalChrome(onClose);
+    const [platformId, setPlatformId] = useState(platforms[0]?.id || '');
+    const [images, setImages] = useState<string[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [rows, setRows] = useState<SyncRow[] | null>(null);
+
+    const platform = platforms.find((p: any) => p.id === platformId);
+    const platformHoldings: AssetHolding[] = useMemo(() => holdings.filter((h: AssetHolding) => h.platformId === platformId), [holdings, platformId]);
+
+    const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files: File[] = e.target.files ? Array.from(e.target.files) : [];
+        e.target.value = '';
+        files.forEach(file => {
+            const reader = new FileReader();
+            reader.onloadend = () => setImages(prev => [...prev, reader.result as string]);
+            reader.readAsDataURL(file);
+        });
+        setRows(null);
+    };
+
+    const analyze = async () => {
+        if (!platform || images.length === 0) return;
+        setLoading(true); setError(''); setRows(null);
+        const known = platformHoldings.map(h => h.symbol).join(', ') || '(none)';
+        const prompt = `This is a screenshot of a brokerage / exchange app showing current positions (holdings).
+Extract EVERY position visible. Return ONLY a JSON array, no prose, like:
+[{"symbol":"2330","name":"台積電","quantity":1000,"avgCost":512.3,"currentPrice":1050}]
+Rules:
+- quantity = shares/units held (股數/數量/庫存). If shown in 張 (Taiwan lots), multiply by 1000.
+- avgCost = average cost PER SHARE (成本均價/平均成本/買進均價). If only total cost is shown, divide by quantity. Use null if not visible.
+- currentPrice = current price per share (現價/市價), null if not visible.
+- Numbers must be plain numbers (no commas, no currency symbols).
+- The user already tracks these symbols on this platform: ${known}. If a position is the same security as one of these, output that exact symbol string.
+- Ignore cash balances, totals and summary rows.`;
+        try {
+            const all: any[] = [];
+            for (const img of images) {
+                const text = await callGemini(prompt, img);
+                const match = (text || '').match(/\[[\s\S]*\]/);
+                if (!match) throw new Error(text || 'AI 沒有回傳資料');
+                all.push(...JSON.parse(match[0]));
+            }
+            // Merge duplicates (same symbol across multiple screenshots): later one wins.
+            const parsed = new Map<string, any>();
+            all.forEach(p => { if (p?.symbol && toNum(p.quantity) !== null) parsed.set(normSymbol(String(p.symbol)), p); });
+            if (parsed.size === 0) throw new Error('截圖中找不到持倉資料');
+
+            const result: SyncRow[] = [];
+            const matched = new Set<string>();
+            parsed.forEach((p, key) => {
+                const h = platformHoldings.find(x => normSymbol(x.symbol) === key);
+                const qty = toNum(p.quantity)!;
+                const cost = toNum(p.avgCost);
+                const price = toNum(p.currentPrice);
+                if (h) {
+                    matched.add(h.id);
+                    result.push({ key: h.id, kind: 'update', holding: h, symbol: h.symbol, name: p.name, quantity: String(qty), avgCost: String(cost ?? h.avgCost), currentPrice: price, include: true });
+                } else {
+                    result.push({ key: 'new-' + key, kind: 'new', symbol: String(p.symbol).toUpperCase().trim(), name: p.name, quantity: String(qty), avgCost: cost !== null ? String(cost) : '', currentPrice: price, include: true });
+                }
+            });
+            platformHoldings.filter(h => !matched.has(h.id)).forEach(h => {
+                result.push({ key: h.id, kind: 'missing', holding: h, symbol: h.symbol, quantity: '0', avgCost: String(h.avgCost), currentPrice: null, include: false });
+            });
+            setRows(result);
+        } catch (err: any) {
+            setError(err?.message || '辨識失敗');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const patchRow = (key: string, patch: Partial<SyncRow>) => setRows(prev => prev && prev.map(r => r.key === key ? { ...r, ...patch } : r));
+
+    const isChanged = (r: SyncRow) => {
+        if (r.kind !== 'update' || !r.holding) return true;
+        const q = toNum(r.quantity), c = toNum(r.avgCost);
+        return Math.abs((q ?? 0) - r.holding.quantity) > 1e-9 || Math.abs((c ?? 0) - r.holding.avgCost) > 1e-6 || (r.currentPrice !== null && r.currentPrice !== r.holding.currentPrice);
+    };
+
+    const handleApply = async () => {
+        if (!rows || !platform) return;
+        const chosen = rows.filter(r => r.include);
+        const bad = chosen.find(r => r.kind !== 'missing' && (toNum(r.quantity) === null || toNum(r.avgCost) === null));
+        if (bad) { alert(`${bad.symbol} 的數量或成本未填`); return; }
+        const holdingsCol = collection(db, getCollectionPath(userId, null, 'holdings'));
+        const batch = writeBatch(db);
+        chosen.forEach(r => {
+            if (r.kind === 'missing' && r.holding) {
+                batch.delete(doc(holdingsCol, r.holding.id));
+            } else if (r.kind === 'update' && r.holding) {
+                const data: any = { quantity: toNum(r.quantity), avgCost: toNum(r.avgCost) };
+                if (r.currentPrice !== null) data.currentPrice = r.currentPrice;
+                batch.update(doc(holdingsCol, r.holding.id), data);
+            } else if (r.kind === 'new') {
+                const qty = toNum(r.quantity)!, cost = toNum(r.avgCost)!;
+                const ref = doc(holdingsCol);
+                batch.set(ref, { symbol: r.symbol, platformId, type: 'stock', currency: platform.currency, quantity: qty, avgCost: cost, currentPrice: r.currentPrice ?? cost });
+                batch.set(doc(collection(ref, 'lots')), { date: Timestamp.now(), quantity: qty, remainingQuantity: qty, costPerShare: cost, currency: platform.currency, note: '截圖同步' });
+            }
+        });
+        await batch.commit();
+        onClose();
+    };
+
+    const kindBadge = { update: 'bg-blue-100 text-blue-600', new: 'bg-emerald-100 text-emerald-600', missing: 'bg-red-100 text-red-600' };
+    const kindLabel = { update: '更新', new: '新增', missing: '截圖沒有' };
+
+    return (
+        <div className={styles.overlay} {...chrome}><div className={styles.content}>
+            <h3 className="font-bold text-xl mb-1">截圖同步倉位</h3>
+            <p className="text-xs text-slate-400 mb-4">上傳券商 App 的庫存截圖，AI 辨識後先讓你確認，再更新數量與成本。不會動到平台現金。</p>
+            <div className="space-y-4">
+                <div><label className={styles.label}>平台</label><select className={styles.input} value={platformId} onChange={e => { setPlatformId(e.target.value); setRows(null); }}>{platforms.map((p: any) => <option key={p.id} value={p.id}>{p.name} ({p.currency})</option>)}</select></div>
+                <div>
+                    <label className={styles.label}>截圖 (可多張)</label>
+                    <div className="flex flex-wrap gap-2">
+                        {images.map((img, i) => (
+                            <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden ring-1 ring-slate-200">
+                                <img src={img} className="w-full h-full object-cover" />
+                                <button onClick={() => { setImages(prev => prev.filter((_, j) => j !== i)); setRows(null); }} className="absolute top-0 right-0 bg-black/50 text-white rounded-bl p-0.5"><X size={12} /></button>
+                            </div>
+                        ))}
+                        <label className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 flex items-center justify-center text-slate-400 cursor-pointer hover:bg-slate-50"><Camera size={20} /><input type="file" accept="image/*" multiple className="hidden" onChange={handleFiles} /></label>
+                    </div>
+                </div>
+                {!rows && <button onClick={analyze} disabled={loading || images.length === 0 || !platform} className={`${styles.btnPrimary} w-full`}>{loading ? <><Loader2 size={16} className="animate-spin" /> 辨識中...</> : <><Sparkles size={16} /> AI 辨識</>}</button>}
+                {error && <div className="text-xs text-red-500 bg-red-50 p-3 rounded-lg whitespace-pre-wrap">{error}</div>}
+                {rows && (
+                    <div className="space-y-2">
+                        <div className="text-xs text-slate-400">勾選要套用的項目，數字可直接修改。</div>
+                        {rows.map(r => {
+                            const changed = isChanged(r);
+                            return (
+                                <div key={r.key} className={`p-3 rounded-xl ring-1 ${r.include ? 'ring-indigo-200 bg-indigo-50/30' : 'ring-slate-100'} ${!changed && r.kind === 'update' ? 'opacity-60' : ''}`}>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <input type="checkbox" checked={r.include} onChange={e => patchRow(r.key, { include: e.target.checked })} className="w-4 h-4" />
+                                        <span className="font-bold text-slate-800">{r.symbol}</span>
+                                        {r.name && <span className="text-xs text-slate-400 truncate">{r.name}</span>}
+                                        <span className={`ml-auto text-[10px] font-bold px-1.5 rounded ${kindBadge[r.kind]}`}>{r.kind === 'update' && !changed ? '無變化' : kindLabel[r.kind]}</span>
+                                    </div>
+                                    {r.kind === 'missing' ? (
+                                        <div className="text-xs text-slate-500">目前 {r.holding?.quantity} 股。勾選＝刪除此持倉（已全部賣出時才勾）。</div>
+                                    ) : (
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div>
+                                                <div className="text-[10px] text-slate-400">數量{r.holding && ` (原 ${r.holding.quantity})`}</div>
+                                                <input type="number" className="w-full px-2 py-1.5 rounded-lg ring-1 ring-slate-200 text-sm" value={r.quantity} onChange={e => patchRow(r.key, { quantity: e.target.value })} />
+                                            </div>
+                                            <div>
+                                                <div className="text-[10px] text-slate-400">平均成本{r.holding && ` (原 ${r.holding.avgCost})`}</div>
+                                                <input type="number" className="w-full px-2 py-1.5 rounded-lg ring-1 ring-slate-200 text-sm" value={r.avgCost} placeholder="必填" onChange={e => patchRow(r.key, { avgCost: e.target.value })} />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                        <button onClick={() => setRows(null)} className="text-xs text-indigo-600 font-bold">重新辨識</button>
+                    </div>
+                )}
+                <div className="flex gap-3 pt-2"><button onClick={onClose} className={styles.btnSecondary}>取消</button>{rows && <SubmitButton onClick={handleApply} disabled={!rows.some(r => r.include)} className={`${styles.btnPrimary} flex-1`}>套用 {rows.filter(r => r.include).length} 項</SubmitButton>}</div>
+            </div>
+        </div></div>
+    );
+};
+
 // --- Sell Asset Modal (FIFO / Lots) ---
 export const SellAssetModal = ({ holding, userId, onClose }: any) => {
     const chrome = useModalChrome(onClose);
@@ -1864,6 +2054,123 @@ export const AIAssistantModal = ({ onClose, contextData }: any) => {
     );
 };
 
+const STATEMENT_HINTS: Record<string, string> = {
+    card: 'This text is a Taiwanese credit card statement (dates may be ROC years, e.g. 115/11/03 = 2026-11-03). Include ONLY individual purchase/refund rows with their posting or transaction date. SKIP previous balance, payments (繳款, 自動扣繳, 轉帳繳款), interest summary, reward points, and total rows. Refunds/credits use a NEGATIVE amount. Foreign-currency purchases: use the TWD amount.',
+    bank: 'This text is a Taiwanese bank account statement (dates may be ROC years). Include ONLY individual transaction rows. SKIP opening/closing balance, interest-rate tables, and summary rows. type is "in" for deposits (存入) and "out" for withdrawals (支出/提領). amount is always positive.',
+};
+
+export const EmailStatementSyncModal = ({ accounts, creditCards, onImport, onClose }: any) => {
+    const chrome = useModalChrome(onClose);
+    const [sources, setSources] = useState<StatementSource[]>(loadSources);
+    const [password, setPassword] = useState(loadPassword);
+    const [showSettings, setShowSettings] = useState(() => !loadPassword() || loadSources().every(s => !s.targetId));
+    const [found, setFoundState] = useState<FoundStatement[] | null>(getLastFound);
+    const setFound = (f: FoundStatement[] | null | ((prev: FoundStatement[] | null) => FoundStatement[] | null)) => setFoundState(prev => { const next = typeof f === 'function' ? f(prev) : f; setLastFound(next); return next; });
+    const [busy, setBusy] = useState<string | null>(null);
+    const [error, setError] = useState('');
+    const clientId = getGoogleClientId();
+
+    const updateSource = (id: string, patch: Partial<StatementSource>) => {
+        const next = sources.map(s => s.id === id ? { ...s, ...patch } : s);
+        setSources(next); saveSources(next);
+    };
+    const addSource = () => {
+        const next = [...sources, { id: 'src-' + Date.now(), label: '新來源', query: 'from:', target: 'card' as const, targetId: '' }];
+        setSources(next); saveSources(next);
+    };
+    const removeSource = (id: string) => { const next = sources.filter(s => s.id !== id); setSources(next); saveSources(next); };
+    const resetSources = () => { const next = DEFAULT_SOURCES.map(s => ({ ...s, targetId: '' })); setSources(next); saveSources(next); };
+
+    const check = async () => {
+        setError(''); setBusy('check');
+        try {
+            const token = await getGmailToken();
+            setFound(await searchStatements(token, sources));
+        } catch (e: any) { setError(e?.message || '檢查失敗'); }
+        finally { setBusy(null); }
+    };
+
+    const importOne = async (st: FoundStatement) => {
+        const src = sources.find(s => s.id === st.sourceId);
+        if (!src) return;
+        if (!password) { setError('請先在設定填入 PDF 密碼'); setShowSettings(true); return; }
+        setError(''); setBusy(st.messageId);
+        try {
+            const token = await getGmailToken();
+            const bytes = await downloadAttachment(token, st.messageId, st.attachmentId);
+            const text = await extractPdfText(bytes, password);
+            if (text.replace(/\s/g, '').length < 50) throw new Error('PDF 裡讀不到文字（可能是掃描圖檔），請改用「圖片掃描」手動匯入');
+            onImport({ target: src.target, targetId: src.targetId, text, hint: STATEMENT_HINTS[src.target], onSaved: () => markProcessed(st.messageId) });
+        } catch (e: any) {
+            setError(e instanceof PdfPasswordError ? 'PDF 密碼錯誤，請確認設定中的密碼（身分證字號英文要大寫）' : (e?.message || '匯入失敗'));
+        } finally { setBusy(null); }
+    };
+
+    const skipOne = (st: FoundStatement) => { markProcessed(st.messageId); setFound(f => f && f.filter(x => x.messageId !== st.messageId)); };
+    const targetName = (src?: StatementSource) => !src ? '' : src.target === 'card' ? creditCards.find((c: any) => c.id === src.targetId)?.name : accounts.find((a: any) => a.id === src.targetId)?.name;
+
+    return (
+        <div className={styles.overlay} {...chrome}><div className={`${styles.content} max-w-lg`}>
+            <div className="flex justify-between items-center mb-1">
+                <h3 className="font-bold text-xl flex items-center gap-2"><Download size={20} className="text-indigo-600" /> Gmail 電子帳單</h3>
+                <button onClick={() => setShowSettings(v => !v)} className="text-slate-400 hover:text-slate-600 p-1"><Settings size={18} /></button>
+            </div>
+            <p className="text-xs text-slate-400 mb-4">從 Gmail 找最近 90 天的帳單 PDF，解密後交給 AI 解析，你確認後才寫入。</p>
+
+            {!clientId && <div className="text-xs text-amber-700 bg-amber-50 p-3 rounded-lg mb-4">尚未設定 <code>VITE_GOOGLE_CLIENT_ID</code>，無法連線 Gmail。</div>}
+
+            {showSettings && (
+                <div className="space-y-3 mb-4 p-3 bg-slate-50 rounded-xl">
+                    <div>
+                        <label className={styles.label}>PDF 密碼（只存在這台裝置）</label>
+                        <input type="password" autoComplete="off" className={styles.input} value={password} placeholder="身分證字號，英文大寫" onChange={e => { const v = e.target.value.toUpperCase(); setPassword(v); savePassword(v); }} />
+                    </div>
+                    <div className={styles.label}>帳單來源</div>
+                    {sources.map(src => (
+                        <div key={src.id} className="bg-white p-3 rounded-lg ring-1 ring-slate-200 space-y-2">
+                            <div className="flex gap-2">
+                                <input className="flex-1 px-2 py-1.5 rounded ring-1 ring-slate-200 text-sm font-bold" value={src.label} onChange={e => updateSource(src.id, { label: e.target.value })} />
+                                <button onClick={() => removeSource(src.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={16} /></button>
+                            </div>
+                            <input className="w-full px-2 py-1.5 rounded ring-1 ring-slate-200 text-xs font-mono" value={src.query} onChange={e => updateSource(src.id, { query: e.target.value })} placeholder="Gmail 搜尋條件" />
+                            <div className="flex gap-2">
+                                <select className="px-2 py-1.5 rounded ring-1 ring-slate-200 text-sm" value={src.target} onChange={e => updateSource(src.id, { target: e.target.value as any, targetId: '' })}>
+                                    <option value="card">信用卡</option><option value="bank">銀行帳戶</option>
+                                </select>
+                                <select className="flex-1 px-2 py-1.5 rounded ring-1 ring-slate-200 text-sm" value={src.targetId} onChange={e => updateSource(src.id, { targetId: e.target.value })}>
+                                    <option value="">（不同步）</option>
+                                    {(src.target === 'card' ? creditCards : accounts).map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                    ))}
+                    <div className="flex gap-3 text-xs font-bold"><button onClick={addSource} className="text-indigo-600">＋ 新增來源</button><button onClick={resetSources} className="text-slate-400">恢復預設</button></div>
+                </div>
+            )}
+
+            <div className="space-y-3">
+                <button onClick={check} disabled={!clientId || busy !== null} className={`${styles.btnPrimary} w-full`}>{busy === 'check' ? <><Loader2 size={16} className="animate-spin" /> 檢查中...</> : <><RefreshCw size={16} /> 檢查新帳單</>}</button>
+                {error && <div className="text-xs text-red-500 bg-red-50 p-3 rounded-lg">{error}</div>}
+                {found && found.length === 0 && <div className="text-center text-sm text-slate-400 py-4">沒有新的帳單</div>}
+                {found && found.map(st => {
+                    const src = sources.find(s => s.id === st.sourceId);
+                    return (
+                        <div key={st.messageId} className="p-3 rounded-xl ring-1 ring-slate-200">
+                            <div className="font-bold text-sm text-slate-800">{st.subject}</div>
+                            <div className="text-xs text-slate-400 mt-0.5">{new Date(st.date).toLocaleDateString()} • {st.filename}</div>
+                            <div className="text-xs text-slate-500 mt-1">匯入到：{targetName(src) || '—'}</div>
+                            <div className="flex gap-2 mt-2">
+                                <button onClick={() => importOne(st)} disabled={busy !== null} className="flex-1 bg-indigo-600 text-white rounded-lg py-1.5 text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-50">{busy === st.messageId ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} 解析並預覽</button>
+                                <button onClick={() => skipOne(st)} disabled={busy !== null} className="px-3 bg-slate-100 text-slate-500 rounded-lg text-xs font-bold">略過</button>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div></div>
+    );
+};
+
 export const AIBatchImportModal = ({ userId, groupId, categories, existingTransactions, accounts, creditCards, existingBankLogs, existingCardLogs, people, onClose, initialConfig }: any) => {
     const chrome = useModalChrome(onClose);
     const [mode, setMode] = useState<'text' | 'image' | 'file'>('text');
@@ -1880,6 +2187,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
         if (initialConfig) {
             setTarget(initialConfig.target);
             if (initialConfig.targetId) setTargetId(initialConfig.targetId);
+            if (initialConfig.text) { setMode('text'); setTextInput(initialConfig.text); }
         } else {
             if (target === 'bank' && accounts.length > 0) setTargetId(accounts[0].id);
             if (target === 'card' && creditCards.length > 0) setTargetId(creditCards[0].id);
@@ -1946,6 +2254,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                 prompt = `Parse the input into a JSON array of credit card logs. Fields: date (YYYY-MM-DD), description, amount (number). Note: Amount should be positive number. (If missing year, use current year ${new Date().getFullYear()}). RETURN ONLY RAW JSON.`;
             }
 
+            if (initialConfig?.hint) prompt += `\n${initialConfig.hint}`;
             const res = await callGemini(prompt, contentToAnalyze);
 
             // Check for API Error messages
@@ -2063,6 +2372,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
                 }
             }
             await Promise.all(batch);
+            initialConfig?.onSaved?.();
             onClose();
         } catch (e) {
             console.error(e);
