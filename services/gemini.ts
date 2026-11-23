@@ -28,6 +28,10 @@ export const ADMIN_EMAILS = [
 export const GEMINI_MODEL = 'gemini-3.8-flash';
 // Used when the main model stays overloaded (503) after retries.
 export const GEMINI_FALLBACK_MODEL = 'gemini-3.6-flash';
+// Stock price lookups run on their own model so they don't eat the free-tier daily quota
+// (per model) that statement/receipt parsing needs.
+export const GEMINI_PRICE_MODEL = 'gemini-3.5-flash-lite';
+const AI_PRICE_CACHE_MS = 6 * 60 * 60 * 1000;
 
 const isOverloaded = (e: any) => /\b503\b|UNAVAILABLE|overloaded|high demand/i.test(e?.message || '');
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -36,8 +40,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 async function generateWithRetry(ai: any, request: any) {
   const plan = [
     { model: GEMINI_MODEL, wait: 0 },
-    { model: GEMINI_MODEL, wait: 1500 },
-    { model: GEMINI_MODEL, wait: 4000 },
+    { model: GEMINI_MODEL, wait: 3000 },
     { model: GEMINI_FALLBACK_MODEL, wait: 1000 },
   ];
   let lastError: any;
@@ -126,6 +129,18 @@ export async function callGemini(prompt: string, imageBase64?: string) {
 }
 
 export async function fetchPriceWithAI(symbol: string): Promise<number | null> {
+  // Cache per symbol: the background refresh runs every 15 min and would otherwise burn the quota.
+  const cacheKey = `ai_price_${symbol.toUpperCase()}`;
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+    if (cached && Date.now() - cached.t < AI_PRICE_CACHE_MS) return cached.p;
+  } catch { /* ignore */ }
+  const price = await fetchPriceWithAIUncached(symbol);
+  if (price !== null) { try { localStorage.setItem(cacheKey, JSON.stringify({ p: price, t: Date.now() })); } catch { /* ignore */ } }
+  return price;
+}
+
+async function fetchPriceWithAIUncached(symbol: string): Promise<number | null> {
   // Logic to get key (duplicated from callGemini to ensure robustness)
   let apiKey: string | undefined;
   const auth = getAuth();
@@ -154,7 +169,7 @@ export async function fetchPriceWithAI(symbol: string): Promise<number | null> {
     const ai = new GoogleGenAI({ apiKey });
     // Using googleSearch tool
     const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: GEMINI_PRICE_MODEL,
       contents: `Search for the current stock price of "${symbol}". If the symbol contains numbers like 1475 or 7203, it is likely a Japanese stock code. Return ONLY the numeric value of the price (e.g. 1234.5). Do not return currency symbols or other text.`,
       config: {
         tools: [{ googleSearch: {} }]
