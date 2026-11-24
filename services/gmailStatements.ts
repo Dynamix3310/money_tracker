@@ -144,11 +144,13 @@ export type PdfContent = { text: string } | { images: string[] };
 const MAX_IMAGE_PAGES = 6;
 
 // Some bank PDFs embed fonts without a Unicode map, so extracted text comes out as Latin-1 garbage.
+// Compare against CJK characters only: digits and ASCII in amounts/dates would dilute a plain ratio.
 const looksGarbled = (text: string) => {
     const chars = text.replace(/\s/g, '');
     if (chars.length < 50) return true;
-    const latin1 = (chars.match(/[ -ÿ]/g) || []).length;
-    return latin1 / chars.length > 0.1;
+    const latin1 = (chars.match(/[\u00A1-\u00FF]/g) || []).length;
+    const cjk = (chars.match(/[\u3400-\u9FFF]/g) || []).length;
+    return latin1 >= 20 && latin1 > cjk * 0.2;
 };
 
 // Decrypts the PDF and returns its text; if the text is unreadable, renders pages to JPEG for Gemini vision.
