@@ -139,21 +139,14 @@ export const setLastFound = (f: FoundStatement[] | null) => { lastFound = f; };
 // --- PDF decrypt + content extraction (pdf.js, loaded on demand) ---
 export class PdfPasswordError extends Error { }
 
-export type PdfContent = { text: string } | { images: string[] };
+// Statements are always sent to Gemini as page images: several banks embed fonts without a
+// Unicode map, so their text layer is garbage (Cathay) or loses Chinese merchant names (CTBC).
+export type PdfContent = { images: string[] };
 
+// Keeps the request under Vercel's ~4.5 MB body limit (each page is roughly 300-500 KB as base64).
 const MAX_IMAGE_PAGES = 6;
 
-// Some bank PDFs embed fonts without a Unicode map, so extracted text comes out as Latin-1 garbage.
-// Compare against CJK characters only: digits and ASCII in amounts/dates would dilute a plain ratio.
-const looksGarbled = (text: string) => {
-    const chars = text.replace(/\s/g, '');
-    if (chars.length < 50) return true;
-    const latin1 = (chars.match(/[\u00A1-\u00FF]/g) || []).length;
-    const cjk = (chars.match(/[\u3400-\u9FFF]/g) || []).length;
-    return latin1 >= 20 && latin1 > cjk * 0.2;
-};
-
-// Decrypts the PDF and returns its text; if the text is unreadable, renders pages to JPEG for Gemini vision.
+// Decrypts the PDF and renders its pages to JPEG.
 export const extractPdfContent = async (bytes: Uint8Array, password: string): Promise<PdfContent> => {
     const pdfjs = await import('pdfjs-dist');
     // @ts-ignore Vite ?url import
@@ -164,6 +157,7 @@ export const extractPdfContent = async (bytes: Uint8Array, password: string): Pr
         pdf = await pdfjs.getDocument({
             data: bytes,
             password,
+            // CMaps and standard fonts are still needed to *render* CJK glyphs correctly.
             cMapUrl: '/pdfjs/cmaps/',
             cMapPacked: true,
             standardFontDataUrl: '/pdfjs/standard_fonts/',
@@ -172,25 +166,6 @@ export const extractPdfContent = async (bytes: Uint8Array, password: string): Pr
         if (e?.name === 'PasswordException') throw new PdfPasswordError('PDF 密碼錯誤');
         throw e;
     }
-
-    const pages: string[] = [];
-    for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        // Rebuild lines by y position so table rows stay on one line.
-        const rows = new Map<number, { x: number; s: string }[]>();
-        for (const it of content.items as any[]) {
-            if (!it.str?.trim()) continue;
-            const y = Math.round(it.transform[5]);
-            const key = [...rows.keys()].find(k => Math.abs(k - y) <= 2) ?? y;
-            if (!rows.has(key)) rows.set(key, []);
-            rows.get(key)!.push({ x: it.transform[4], s: it.str });
-        }
-        const lines = [...rows.entries()].sort((a, b) => b[0] - a[0]).map(([, cells]) => cells.sort((a, b) => a.x - b.x).map(c => c.s).join(' '));
-        pages.push(lines.join('\n'));
-    }
-    const text = pages.join('\n\n');
-    if (!looksGarbled(text)) return { text };
 
     const images: string[] = [];
     for (let i = 1; i <= Math.min(pdf.numPages, MAX_IMAGE_PAGES); i++) {
