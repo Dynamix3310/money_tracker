@@ -37,8 +37,10 @@ const proxySender: Sender = async (req) => {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(req),
   });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`${r.status} ${data.error || r.statusText}`);
+  const raw = await r.text();
+  let data: any = {};
+  try { data = JSON.parse(raw); } catch { /* non-JSON, e.g. a crashed function */ }
+  if (!r.ok) throw new Error(`${r.status} ${data.error || raw.slice(0, 200) || r.statusText}`);
   return { text: data.text };
 };
 
@@ -72,16 +74,21 @@ async function generateWithRetry(send: Sender, contents: any) {
   throw lastError;
 }
 
-export async function callGemini(prompt: string, imageBase64?: string) {
+export async function callGemini(prompt: string, image?: string | string[]) {
   const sender = await getSender();
   if (typeof sender === 'string') return sender;
 
   try {
     let contents: any = prompt;
-    if (imageBase64) {
-      const base64Data = imageBase64.split(',')[1] || imageBase64;
-      const mimeType = imageBase64.match(/^data:([^;]+);base64,/)?.[1] || 'image/jpeg';
-      contents = { parts: [{ inlineData: { mimeType, data: base64Data } }, { text: prompt }] };
+    const images = image ? (Array.isArray(image) ? image : [image]) : [];
+    if (images.length) {
+      const parts = images.map(img => ({
+        inlineData: {
+          mimeType: img.match(/^data:([^;]+);base64,/)?.[1] || 'image/jpeg',
+          data: img.split(',')[1] || img,
+        }
+      }));
+      contents = { parts: [...parts, { text: prompt }] };
     }
     const response = await generateWithRetry(sender, contents);
     return response.text || '';

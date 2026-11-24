@@ -132,7 +132,7 @@ export default function App() {
    const [confirmData, setConfirmData] = useState<{ title: string, message: string, action: () => void } | null>(null);
 
    // Batch Import Context
-   const [batchConfig, setBatchConfig] = useState<{ target: 'ledger' | 'bank' | 'card', targetId?: string, text?: string, hint?: string, onSaved?: () => void, returnTo?: string } | null>(null);
+   const [batchConfig, setBatchConfig] = useState<{ target: 'ledger' | 'bank' | 'card', targetId?: string, text?: string, images?: string[], hint?: string, cardMap?: Record<string, string>, onSaved?: () => void, returnTo?: string } | null>(null);
 
    // Data Loading Helper
    const loadCache = (key: string, defaultVal: any) => { try { const c = localStorage.getItem(key); return c ? JSON.parse(c) : defaultVal; } catch { return defaultVal; } };

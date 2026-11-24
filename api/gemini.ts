@@ -2,7 +2,7 @@
 // The browser sends a Firebase ID token; we verify it and the email allowlist before calling Gemini.
 import { GoogleGenAI } from '@google/genai';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import { ADMIN_EMAILS, ALLOWED_GEMINI_MODELS } from '../services/admins';
+import { ADMIN_EMAILS, ALLOWED_GEMINI_MODELS } from '../services/admins.js'; // .js required: package is ESM
 
 const FIREBASE_JWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com'));
 const MAX_BODY_BYTES = 4 * 1024 * 1024;

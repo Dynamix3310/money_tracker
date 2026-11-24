@@ -136,21 +136,41 @@ let lastFound: FoundStatement[] | null = null;
 export const getLastFound = () => lastFound && lastFound.filter(f => !loadProcessed().includes(f.messageId));
 export const setLastFound = (f: FoundStatement[] | null) => { lastFound = f; };
 
-// --- PDF decrypt + text extraction (pdf.js, loaded on demand) ---
+// --- PDF decrypt + content extraction (pdf.js, loaded on demand) ---
 export class PdfPasswordError extends Error { }
 
-export const extractPdfText = async (bytes: Uint8Array, password: string): Promise<string> => {
+export type PdfContent = { text: string } | { images: string[] };
+
+const MAX_IMAGE_PAGES = 6;
+
+// Some bank PDFs embed fonts without a Unicode map, so extracted text comes out as Latin-1 garbage.
+const looksGarbled = (text: string) => {
+    const chars = text.replace(/\s/g, '');
+    if (chars.length < 50) return true;
+    const latin1 = (chars.match(/[ -ÿ]/g) || []).length;
+    return latin1 / chars.length > 0.1;
+};
+
+// Decrypts the PDF and returns its text; if the text is unreadable, renders pages to JPEG for Gemini vision.
+export const extractPdfContent = async (bytes: Uint8Array, password: string): Promise<PdfContent> => {
     const pdfjs = await import('pdfjs-dist');
     // @ts-ignore Vite ?url import
     const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
     pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
     let pdf;
     try {
-        pdf = await pdfjs.getDocument({ data: bytes, password }).promise;
+        pdf = await pdfjs.getDocument({
+            data: bytes,
+            password,
+            cMapUrl: '/pdfjs/cmaps/',
+            cMapPacked: true,
+            standardFontDataUrl: '/pdfjs/standard_fonts/',
+        }).promise;
     } catch (e: any) {
         if (e?.name === 'PasswordException') throw new PdfPasswordError('PDF 密碼錯誤');
         throw e;
     }
+
     const pages: string[] = [];
     for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
@@ -167,5 +187,21 @@ export const extractPdfText = async (bytes: Uint8Array, password: string): Promi
         const lines = [...rows.entries()].sort((a, b) => b[0] - a[0]).map(([, cells]) => cells.sort((a, b) => a.x - b.x).map(c => c.s).join(' '));
         pages.push(lines.join('\n'));
     }
-    return pages.join('\n\n');
+    const text = pages.join('\n\n');
+    if (!looksGarbled(text)) return { text };
+
+    const images: string[] = [];
+    for (let i = 1; i <= Math.min(pdf.numPages, MAX_IMAGE_PAGES); i++) {
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 1.8 });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, viewport } as any).promise;
+        images.push(canvas.toDataURL('image/jpeg', 0.72));
+    }
+    return { images };
 };

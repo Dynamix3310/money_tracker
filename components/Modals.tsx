@@ -5,7 +5,7 @@ import { RecurringRule, Person, Category, AssetHolding, Platform, CreditCardLog,
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, Timestamp, updateDoc, getDocs, query, orderBy, where, increment, getDoc, writeBatch } from 'firebase/firestore';
 import { db, getCollectionPath, auth, getUserProfilePath } from '../services/firebase';
 import { callGemini } from '../services/gemini';
-import { StatementSource, FoundStatement, DEFAULT_SOURCES, loadSources, saveSources, loadPassword, savePassword, markProcessed, getGoogleClientId, getGmailToken, searchStatements, downloadAttachment, extractPdfText, PdfPasswordError, getLastFound, setLastFound } from '../services/gmailStatements';
+import { StatementSource, FoundStatement, DEFAULT_SOURCES, loadSources, saveSources, loadPassword, savePassword, markProcessed, getGoogleClientId, getGmailToken, searchStatements, downloadAttachment, extractPdfContent, PdfPasswordError, getLastFound, setLastFound } from '../services/gmailStatements';
 import { evaluateExpression, isExpression } from '../utils/calc';
 import { ALLOWED_CURRENCIES, PLATFORM_CURRENCIES, getSoloIncomeCategoryNames } from '../constants';
 import confetti from 'canvas-confetti';
@@ -2098,10 +2098,10 @@ export const EmailStatementSyncModal = ({ accounts, creditCards, onImport, onClo
         try {
             const token = await getGmailToken();
             const bytes = await downloadAttachment(token, st.messageId, st.attachmentId);
-            const text = await extractPdfText(bytes, password);
-            if (text.replace(/\s/g, '').length < 50) throw new Error('PDF 裡讀不到文字（可能是掃描圖檔），請改用「圖片掃描」手動匯入');
+            // Text when the PDF has a usable text layer, otherwise rendered page images.
+            const content = await extractPdfContent(bytes, password);
             const cardMap = src.target === 'card' ? Object.fromEntries((src.cards || []).filter(c => /^\d{4}$/.test(c.last4) && c.cardId).map(c => [c.last4, c.cardId])) : {};
-            onImport({ target: src.target, targetId: src.targetId, text, hint: STATEMENT_HINTS[src.target], cardMap: Object.keys(cardMap).length ? cardMap : undefined, onSaved: () => markProcessed(st.messageId) });
+            onImport({ target: src.target, targetId: src.targetId, ...content, hint: STATEMENT_HINTS[src.target], cardMap: Object.keys(cardMap).length ? cardMap : undefined, onSaved: () => markProcessed(st.messageId) });
         } catch (e: any) {
             setError(e instanceof PdfPasswordError ? 'PDF 密碼錯誤，請確認設定中的密碼（身分證字號英文要大寫）' : (e?.message || '匯入失敗'));
         } finally { setBusy(null); }
@@ -2212,6 +2212,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
             setTarget(initialConfig.target);
             if (initialConfig.targetId) setTargetId(initialConfig.targetId);
             if (initialConfig.text) { setMode('text'); setTextInput(initialConfig.text); }
+            if (initialConfig.images?.length) { setMode('image'); setImagePreview(initialConfig.images[0]); }
         } else {
             if (target === 'bank' && accounts.length > 0) setTargetId(accounts[0].id);
             if (target === 'card' && creditCards.length > 0) setTargetId(creditCards[0].id);
@@ -2283,7 +2284,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
             if (cardMap) prompt += `\nThe statement covers several cards. For EVERY row also output cardLast4: the last 4 digits (string) of the card number of the section or row it belongs to (known cards: ${Object.keys(cardMap).join(', ')}).`;
             // Text/CSV goes inside the prompt; only real images are sent as image data.
             const res = mode === 'image'
-                ? await callGemini(prompt, contentToAnalyze)
+                ? await callGemini(prompt, initialConfig?.images?.length ? initialConfig.images : contentToAnalyze)
                 : await callGemini(`${prompt}\n\n--- DATA START ---\n${contentToAnalyze}\n--- DATA END ---`);
 
             // Check for API Error messages
@@ -2496,7 +2497,7 @@ export const AIBatchImportModal = ({ userId, groupId, categories, existingTransa
 
                         {mode === 'image' && (
                             <div className="border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center bg-slate-50 relative">
-                                {imagePreview ? <img src={imagePreview} className="max-h-40 rounded object-contain" /> : <div className="text-slate-400 text-center"><Camera size={32} className="mx-auto mb-2" /><span className="text-xs">點擊上傳照片</span></div>}
+                                {imagePreview ? <div className="text-center"><img src={imagePreview} className="max-h-40 rounded object-contain mx-auto" />{initialConfig?.images?.length > 1 && <div className="text-xs text-slate-500 mt-2">PDF 已轉成 {initialConfig.images.length} 頁圖片，會全部送出分析</div>}</div> : <div className="text-slate-400 text-center"><Camera size={32} className="mx-auto mb-2" /><span className="text-xs">點擊上傳照片</span></div>}
                                 <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleImageChange} />
                             </div>
                         )}
